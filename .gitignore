@@ -1,0 +1,28 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods (not planned, but harmless to ignore if introduced later)
+Pods/
+
+# Firebase — GoogleService-Info.plist is project config, not a secret on the
+# Spark plan, but keep it out of version control by default per §5.7's
+# convention of not committing environment-specific config.
+GoogleService-Info.plist
+
+# macOS
+.DS_Store
