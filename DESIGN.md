@@ -232,8 +232,13 @@ couples/{coupleId}/importantDates/{id}  // see §7.4
 couples/{coupleId}/pings/{pingId}       // "thinking of you", see §7.1
   - sentBy: uid
   - sentAt: Timestamp
-  // TTL policy (free on Spark plan) auto-deletes these after a few days —
-  // no Cloud Function needed to clean them up.
+  // TTL policy auto-deletes these after a few days, no Cloud Function
+  // needed. (Verified: TTL is a Standard-edition Firestore feature, not
+  // gated to Enterprise edition — a first search pass misread Firebase's
+  // doc-site URL structure and suggested otherwise; a second pass found
+  // Google's own docs explicitly describing TTL field behavior "for
+  // Standard edition databases." High confidence, but cheap enough to
+  // glance at in the console during §5.7's project setup to be certain.)
 ```
 
 ### 5.2 Sync flow (no push — four layered mechanisms)
@@ -394,7 +399,8 @@ failure mode for that).
    tracked in §10.
 6. **Guessing-window mitigation**: at creation, set `codeExpiresAt: now +
    48h` on the couple doc and register it with a Firestore TTL policy
-   (free on Spark, no Cloud Function). When the second participant joins,
+   (free on Spark, no Cloud Function — verified in §5.1). When the second
+   participant joins,
    clear `codeExpiresAt` to `null` as part of that same write, so paired
    couples are never auto-deleted — only codes that sat unpaired for 2 days
    get cleaned up, which is what bounds how long a ~1-billion-combination
@@ -462,11 +468,28 @@ question (§10) rather than assumed.
   network, expired/unrefreshable token, Keychain Sharing unavailable — fall
   back silently to the last value written to the App Group cache. The
   widget should never show an error state, only ever "last known good."
-- If Keychain Sharing turns out not to work under a free team either, the
-  widget simply loses its independent refresh path and falls back to
-  showing only what the main app last cached (mechanism #4 in §5.2
-  degrades to "off," mechanisms #1-3 still apply) — not a dead end, just a
-  staler widget.
+
+**All four App Groups × Keychain Sharing outcomes, planned individually**
+(previously this only described two of them):
+- **Both work**: design as-is above.
+- **Only Keychain Sharing works**: store `coupleId` in the shared Keychain
+  alongside the refresh token (a Keychain item can hold any string, not
+  just the token) and skip the App Group cache entirely — the widget
+  becomes fully self-sufficient via Keychain + REST, no App Groups
+  dependency anywhere.
+- **Only App Groups works**: the widget can't mint its own ID token, so
+  mechanism #4 in §5.2 degrades to "off" — the widget only ever shows what
+  the main app last wrote to the cache, no independent refresh.
+- **Neither works**: this is the case previously undersold as "not a dead
+  end, just staler" — without either capability the widget has no
+  automatic channel to receive *any* data, which would break the countdown
+  display entirely, not just make it stale. The real fallback is making
+  the widget a **configurable widget** (`AppIntent`/`IntentConfiguration`)
+  where `coupleId` (and a long-lived custom token, separate from Firebase
+  Auth) is entered manually into the widget's own settings when it's added
+  to the Home Screen — WidgetKit persists configuration values itself,
+  independent of App Groups or Keychain. Real UX friction (manual
+  copy/paste once), but a genuine escape hatch rather than a dead end.
 
 ### 5.6 Project & target structure
 
@@ -694,32 +717,49 @@ keeps this accurate in practice almost all the time.
 
 **Genuinely open — need your input or empirical testing, not yet resolved:**
 
-- **App Groups *and* Keychain Sharing under a free Personal Team**: two
-  separate capabilities (§5.6), both leaned on (widget cache, and the
-  widget's own auth token refresh in §5.5), neither confirmed under a free
-  team — there are scattered reports of App Groups specifically failing
-  this way. Needs one early spike: a throwaway two-target project,
-  free-team signed, confirming both provision without error, before the
-  widget architecture in §6 is really final. Low effort to check, high
-  impact if either fails — and both already have documented fallbacks
-  (§5.5, §6) so a failure here degrades the widget, it doesn't block the
-  project.
+- **App Groups, Keychain Sharing, *and* Background Modes under a free
+  Personal Team**: broadened from two capabilities to three — verification
+  found that `UIBackgroundModes` is fundamentally an `Info.plist` key, not
+  an entitlement (supporting the original claim that it's free-team safe),
+  but also surfaced scattered free-team users reporting Xcode's Capabilities
+  UI adding it as an entitlement anyway and then failing to provision. That
+  puts Background Modes in the same uncertain bucket as App Groups/Keychain
+  Sharing rather than a separately-settled one. **Resolution plan**: one
+  spike covering all three — a throwaway two/three-target project,
+  free-team signed, confirming each provisions without error. All three
+  already have documented fallbacks (§5.5/§6 for the first two; §5.2 #3 is
+  already framed as "nice-to-have, not guaranteed" for the third), so a
+  failure here degrades the app, it doesn't block the project — see §5.5's
+  four-outcome fallback tree for exactly how App Groups/Keychain Sharing
+  failures are handled.
 - **Firestore Security Rules**: draft written in §5.3 — still needs to run
   against the Firebase emulator with real test cases (own participant edit,
   join while open, join while full, stranger read while full, membership
-  tamper attempt) before it's trustworthy. This is real engineering work,
-  not just a config toggle, and is arguably the trickiest part of the whole
-  build given push/CKShare are both gone.
+  tamper attempt) before it's trustworthy. **This is the one item on this
+  list that needs no Apple hardware at all** — it's pure Node.js tooling
+  (`firebase-tools` + `@firebase/rules-unit-testing`) and could be written
+  and run in a single sitting, independent of the device-bound items above.
+  A quick manual pass in the Firebase Console's interactive Rules Playground
+  is a good complement before committing to the full automated suite.
 - **`BGAppRefreshTask` real-world reliability**: needs empirical testing on
-  a real device over a few days to understand actual firing frequency
-  before relying on it in any UI messaging.
+  a real device over a few days to understand actual firing frequency.
+  **Pre-committed threshold**: instrument every firing (timestamp appended
+  to a small persisted log, §5.8) from day one of having the app running,
+  and if real-world data shows meaningfully fewer than ~2 firings/day on
+  average, drop the mechanism from v1 rather than keep maintaining code for
+  a path that isn't pulling its weight — mechanisms #1/#2/#4 already cover
+  the important cases without it.
 - **Revisiting the $0 rule later**: if the best-effort sync in §5.4, or the
   re-signing consequence in §2, prove too painful in practice once actually
   used, the $99/year path (CloudKit + push, and/or TestFlight distribution,
   as drafted in v0.1/discussed in §2) remains a known, fully-designed
   fallback — worth keeping this document's v0.1 CloudKit sections in git
   history rather than deleting the thinking, in case that tradeoff gets
-  revisited.
+  revisited. **Make the trigger measurable, not a vibe**: extend the same
+  `BGAppRefreshTask` instrumentation above to also log real sync latency —
+  timestamp when a partner made a change vs. when it was actually observed
+  on the other device — so this decision has real data behind it later
+  instead of "it felt slow."
 
 **Fully resolved:**
 
@@ -783,15 +823,17 @@ in push/pairing plumbing.
 
 ## 13. Next steps
 
-1. Spike the App Groups + Keychain Sharing-under-free-team question (§10)
-   — quick, and gates the widget architecture in §6 and the widget auth
-   design in §5.5.
+1. Spike the App Groups + Keychain Sharing + Background Modes-under-free-
+   team question (§10) — quick, and gates the widget architecture in §6,
+   the widget auth design in §5.5, and how much to trust `BGAppRefreshTask`
+   in §5.2 #3.
 2. Update the MacBook Pro past Sonoma 14.6.1 to Sequoia/Tahoe (§4) before
    installing the latest Xcode — routine, no longer an open question.
 3. Set up the Xcode project with the target structure from §5.6.
 4. Set up the Firebase project per §5.7 (Spark plan, Native-mode Firestore,
    Anonymous Auth only) and write/test the Security Rules from §5.3 using
-   the local emulator.
+   the local emulator — this step needs no Apple hardware and can happen in
+   parallel with, or even before, step 1.
 5. Build the join-code pairing flow (§5.3) end to end between two test
    devices/accounts, including the onboarding name-entry step.
 6. Build the sync mechanisms (§5.2) incrementally: launch fetch first
