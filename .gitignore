@@ -54,6 +54,12 @@
 !*.js
 !*.rules
 
+# XcodeGen project spec (project.yml) and the GitHub Actions workflow that
+# builds it (DESIGN.md §5.6/§13) — CI generates the real .xcodeproj from
+# this rather than one being hand-authored or committed.
+!*.yml
+!*.yaml
+
 # --- Explicit re-exclusions (narrower than an allow-rule above) ---
 # Order matters: these come after the allow-rules so they win.
 
@@ -73,6 +79,12 @@ ui-debug.log
 pubsub-debug.log
 .firebase/
 firestore-export/
+
+# XcodeGen-generated output — regenerated from project.yml by CI (or
+# locally via `xcodegen generate`), never committed. project.yml is the
+# source of truth (DESIGN.md §5.6).
+/CoupleCountdown.xcodeproj/
+/Generated/
 
 # Xcode per-user/per-machine state — never portfolio-relevant, never
 # something a second machine should inherit.
