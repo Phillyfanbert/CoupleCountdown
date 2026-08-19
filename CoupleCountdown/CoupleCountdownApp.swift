@@ -2,6 +2,7 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAuth
 import CoupleCountdownKit
 
 @main
