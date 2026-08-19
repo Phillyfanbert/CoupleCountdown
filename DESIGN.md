@@ -383,7 +383,16 @@ failure mode for that).
 
          allow delete: if false; // no deletes in v1
 
-         match /{sub=**} {
+         // NOT `{sub=**}` (recursive wildcard) — that can match *zero*
+         // additional segments in Firestore Rules, meaning it also
+         // matched the couples/{coupleId} document itself and silently
+         // granted any participant unrestricted write access there,
+         // completely bypassing the tamper guard in `allow update` above.
+         // Subcollections (events, importantDates, pings) are all exactly
+         // one level deep, so requiring a mandatory collection-name
+         // segment before the document wildcard is sufficient and
+         // structurally can't match the parent.
+         match /{subcollection}/{docId} {
            allow read, write: if request.auth != null &&
              request.auth.uid in
                get(/databases/$(database)/documents/couples/$(coupleId)).data.participantUIDs;
@@ -393,10 +402,16 @@ failure mode for that).
    }
    ```
 
-   This still needs to be run against the Firestore emulator with real test
-   cases (own participant edit, join while open, join while full, stranger
-   read while full, membership tamper attempt) before it's trustworthy —
-   tracked in §10.
+   **Verified — run against the Firestore emulator, 18/18 tests passing**
+   (`firebase/test/rules.test.js`; run via `npm test` from `firebase/`),
+   covering all five originally-planned cases (own participant edit, join
+   while open, join while full, stranger read while full, membership
+   tamper attempt) plus create/subcollection/unauthenticated-access checks.
+   **This caught a real bug**, not a hypothetical one: the `{sub=**}` bug
+   described above was found by the "membership tamper attempt" test
+   failing against the first version of this file — pure inspection (mine
+   and this document's, across two prior drafts) had missed it entirely.
+   The fixed version above is what's actually in `firebase/firestore.rules`.
 6. **Guessing-window mitigation**: at creation, set `codeExpiresAt: now +
    48h` on the couple doc and register it with a Firestore TTL policy
    (free on Spark, no Cloud Function — verified in §5.1). When the second
@@ -732,15 +747,6 @@ keeps this accurate in practice almost all the time.
   failure here degrades the app, it doesn't block the project — see §5.5's
   four-outcome fallback tree for exactly how App Groups/Keychain Sharing
   failures are handled.
-- **Firestore Security Rules**: draft written in §5.3 — still needs to run
-  against the Firebase emulator with real test cases (own participant edit,
-  join while open, join while full, stranger read while full, membership
-  tamper attempt) before it's trustworthy. **This is the one item on this
-  list that needs no Apple hardware at all** — it's pure Node.js tooling
-  (`firebase-tools` + `@firebase/rules-unit-testing`) and could be written
-  and run in a single sitting, independent of the device-bound items above.
-  A quick manual pass in the Firebase Console's interactive Rules Playground
-  is a good complement before committing to the full automated suite.
 - **`BGAppRefreshTask` real-world reliability**: needs empirical testing on
   a real device over a few days to understand actual firing frequency.
   **Pre-committed threshold**: instrument every firing (timestamp appended
@@ -768,6 +774,15 @@ keeps this accurate in practice almost all the time.
   MacBook Pro has no hardware ceiling on macOS/Xcode versions, just needs a
   routine software update (Sonoma 14.6.1 → Sequoia/Tahoe) before installing
   the latest Xcode.
+- **Firestore Security Rules** (§5.3): written, run against the local
+  emulator, 18/18 tests passing (`firebase/test/rules.test.js`) — this
+  needed no Apple hardware at all, so it was done ahead of the
+  device-bound items above rather than waiting on them. Found and fixed a
+  real bug in the process (the `{sub=**}` recursive-wildcard issue
+  documented in §5.3), not just a hypothetical one — direct evidence that
+  the emulator-testing step was worth doing rather than trusting inspection
+  alone, and a useful data point for how much scrutiny the remaining
+  untested pieces of this design still deserve.
 
 **Decided with a default — documented, but flag if you'd rather change
 them:**
@@ -830,10 +845,10 @@ in push/pairing plumbing.
 2. Update the MacBook Pro past Sonoma 14.6.1 to Sequoia/Tahoe (§4) before
    installing the latest Xcode — routine, no longer an open question.
 3. Set up the Xcode project with the target structure from §5.6.
-4. Set up the Firebase project per §5.7 (Spark plan, Native-mode Firestore,
-   Anonymous Auth only) and write/test the Security Rules from §5.3 using
-   the local emulator — this step needs no Apple hardware and can happen in
-   parallel with, or even before, step 1.
+4. ~~Write/test the Security Rules from §5.3 using the local emulator~~ —
+   **done** (§10). Still need to set up the real Firebase project itself
+   per §5.7 (Spark plan, Native-mode Firestore, Anonymous Auth only) —
+   that half needs your Google login and hasn't happened yet.
 5. Build the join-code pairing flow (§5.3) end to end between two test
    devices/accounts, including the onboarding name-entry step.
 6. Build the sync mechanisms (§5.2) incrementally: launch fetch first

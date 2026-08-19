@@ -49,6 +49,11 @@
 !*.jpg
 !*.jpeg
 
+# Firestore Security Rules test harness (firebase/) — plain Node.js/Mocha,
+# no Xcode involved (DESIGN.md §10/§13).
+!*.js
+!*.rules
+
 # --- Explicit re-exclusions (narrower than an allow-rule above) ---
 # Order matters: these come after the allow-rules so they win.
 
@@ -56,6 +61,18 @@
 # (DESIGN.md §5.7) even though it's a .plist and would otherwise match the
 # rule above.
 GoogleService-Info.plist
+
+# Node.js dependencies & Firebase emulator artifacts — regenerable, never
+# source. node_modules/ is the big one: without this, the broad `!*.js`
+# and `!*.json` allow-rules above would happily track every file inside
+# every npm dependency.
+node_modules/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+pubsub-debug.log
+.firebase/
+firestore-export/
 
 # Xcode per-user/per-machine state — never portfolio-relevant, never
 # something a second machine should inherit.

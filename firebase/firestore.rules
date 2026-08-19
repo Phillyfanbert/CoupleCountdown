@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /couples/{coupleId} {
+      // Readable only by an existing participant, or by anyone (i.e. a
+      // holder of the code) while a slot is still open to join.
+      allow get: if request.auth != null &&
+        (request.auth.uid in resource.data.participantUIDs ||
+         resource.data.participantUIDs.size() < 2);
+
+      // No `list` is ever granted on this collection — codes can only
+      // be looked up by exact ID, never browsed/enumerated.
+
+      allow create: if request.auth != null &&
+        request.resource.data.participantUIDs == [request.auth.uid];
+
+      allow update: if request.auth != null && (
+        // Existing participant editing anything EXCEPT participantUIDs
+        // — membership can never be changed by a normal edit, only by
+        // the join path below.
+        (request.auth.uid in resource.data.participantUIDs &&
+         !request.resource.data.diff(resource.data).affectedKeys()
+           .hasAny(['participantUIDs']))
+        ||
+        // Joining: append self only, only while a slot is open, only
+        // that one field changes.
+        (resource.data.participantUIDs.size() < 2 &&
+         !(request.auth.uid in resource.data.participantUIDs) &&
+         request.resource.data.participantUIDs ==
+           resource.data.participantUIDs.concat([request.auth.uid]) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['participantUIDs']))
+      );
+
+      allow delete: if false; // no deletes in v1
+
+      // Deliberately NOT `{sub=**}` (recursive wildcard): that can match
+      // *zero* additional segments in Firestore Rules, meaning it also
+      // matched the couples/{coupleId} document itself and silently
+      // granted any participant unrestricted write access there —
+      // completely bypassing the tamper guard in `allow update` above.
+      // Found by the emulator test suite, not by inspection. Subcollections
+      // (events, importantDates, pings) are all exactly one level deep, so
+      // requiring a mandatory collection-name segment before the document
+      // wildcard is sufficient and structurally can't match the parent.
+      match /{subcollection}/{docId} {
+        allow read, write: if request.auth != null &&
+          request.auth.uid in
+            get(/databases/$(database)/documents/couples/$(coupleId)).data.participantUIDs;
+      }
+    }
+  }
+}
