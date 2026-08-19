@@ -10,7 +10,12 @@ struct CountdownView: View {
     @StateObject private var sync: SyncCoordinator
     @StateObject private var viewModel: CountdownViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pendingDate = Date().addingTimeInterval(7 * 86_400)
+
+    @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
+    private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
+    private var theme: CoupleTheme { CoupleTheme(rawValue: selectedThemeRaw) ?? .blush }
 
     init(coupleId: String, uid: String) {
         self.coupleId = coupleId
@@ -38,22 +43,30 @@ struct CountdownView: View {
                     .padding()
                     .frame(maxWidth: .infinity)
             }
+            .themedBackground()
             .refreshable {
                 await sync.fetchOnLaunch()
             }
-            .navigationTitle("CoupleCountdown")
+            .navigationTitle("💕 CoupleCountdown")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    NavigationLink("Stats") { StatsView(coupleId: coupleId) }
+                    NavigationLink { StatsView(coupleId: coupleId) } label: {
+                        Image(systemName: "chart.bar.fill")
+                    }
                 }
                 ToolbarItem(placement: .secondaryAction) {
-                    NavigationLink("Important Dates") { ImportantDatesListView(coupleId: coupleId) }
+                    NavigationLink { ImportantDatesListView(coupleId: coupleId) } label: {
+                        Label("Important Dates", systemImage: "calendar.badge.clock")
+                    }
                 }
                 ToolbarItem(placement: .secondaryAction) {
-                    NavigationLink("Settings") { SettingsView() }
+                    NavigationLink { SettingsView() } label: {
+                        Label("Settings", systemImage: "paintpalette.fill")
+                    }
                 }
             }
         }
+        .tint(theme.accentColor)
         .task {
             // .onChange(of: scenePhase) below only fires on a transition,
             // never for the view's initial value — on a normal launch the
@@ -80,42 +93,94 @@ struct CountdownView: View {
 
     @ViewBuilder
     private var content: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             if let state = sync.state {
-                if let nextMeetupDate = state.nextMeetupDate {
-                    Text(timerInterval: CountdownFormatter.timerInterval(to: nextMeetupDate), countsDown: true)
-                        .font(.system(.largeTitle, design: .rounded))
-                        .contentTransition(.numericText())
-                } else {
-                    // No-date-set state applies immediately after pairing
-                    // too, not just the "leaving again" edge case (§6, §8).
-                    Text("No date set yet")
-                        .foregroundStyle(.secondary)
-                }
+                countdownCard(state: state)
+                statusBadge(state: state)
+                partnerTimeZones(state: state)
 
-                Text(state.status == .together ? "Together" : "Apart")
-                    .font(.headline)
-
-                ForEach(Array(state.partnerProfiles.keys.sorted()), id: \.self) { profileUID in
-                    if let profile = state.partnerProfiles[profileUID] {
-                        Text(CountdownFormatter.localTimeString(label: profile.displayName, timeZoneIdentifier: profile.timeZoneIdentifier))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Button(state.status == .apart ? "We're together now" : "Leaving again") {
+                Button {
                     Task { await toggleStatus(state: state) }
+                } label: {
+                    Label(
+                        state.status == .apart ? "We're together now" : "Leaving again",
+                        systemImage: state.status == .apart ? "heart.fill" : "airplane.departure"
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(theme.accentColor)
+                .controlSize(.large)
 
                 ThinkingOfYouButton(coupleId: coupleId)
             } else {
                 ProgressView("Loading…")
+                    .padding(.top, 80)
             }
 
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func countdownCard(state: RelationshipState) -> some View {
+        VStack(spacing: 8) {
+            if let nextMeetupDate = state.nextMeetupDate {
+                Text("Until we're together again")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(timerInterval: CountdownFormatter.timerInterval(to: nextMeetupDate), countsDown: true)
+                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    .contentTransition(.numericText())
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            } else {
+                // No-date-set state applies immediately after pairing
+                // too, not just the "leaving again" edge case (§6, §8).
+                Image(systemName: "calendar.badge.plus")
+                    .font(.largeTitle)
+                    .foregroundStyle(theme.accentColor)
+                Text("No date set yet")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: theme.accentColor.opacity(0.2), radius: 12, y: 6)
+    }
+
+    @ViewBuilder
+    private func statusBadge(state: RelationshipState) -> some View {
+        Label(
+            state.status == .together ? "Together right now" : "Apart, for now",
+            systemImage: state.status == .together ? "heart.fill" : "heart"
+        )
+        .font(.headline)
+        .foregroundStyle(theme.accentColor)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(theme.accentColor.opacity(0.15), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func partnerTimeZones(state: RelationshipState) -> some View {
+        if !state.partnerProfiles.isEmpty {
+            VStack(spacing: 4) {
+                ForEach(Array(state.partnerProfiles.keys.sorted()), id: \.self) { profileUID in
+                    if let profile = state.partnerProfiles[profileUID] {
+                        Label(
+                            CountdownFormatter.localTimeString(label: profile.displayName, timeZoneIdentifier: profile.timeZoneIdentifier),
+                            systemImage: "clock.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -148,12 +213,13 @@ struct CountdownView: View {
                     Text(errorMessage).foregroundStyle(.red).font(.caption)
                 }
             }
-            .navigationTitle("When do you leave?")
+            .navigationTitle("When do you leave? ✈️")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         Task { await saveDate() }
                     }
+                    .tint(theme.accentColor)
                 }
             }
         }

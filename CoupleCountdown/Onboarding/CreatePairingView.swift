@@ -19,22 +19,34 @@ struct CreatePairingView: View {
     var body: some View {
         VStack(spacing: 20) {
             if let generatedCode {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 40))
+                    .foregroundStyle(CoupleTheme.blush.accentColor)
+
                 Text("Your code")
-                    .font(.headline)
+                    .font(.system(.headline, design: .rounded))
                 Text(generatedCode)
-                    .font(.system(.largeTitle, design: .monospaced))
+                    .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                     .textSelection(.enabled)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(CoupleTheme.blush.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 if let qrImage = Self.qrCode(for: "couplecountdown://join/\(generatedCode)") {
                     Image(uiImage: qrImage)
                         .interpolation(.none)
                         .resizable()
                         .frame(width: 200, height: 200)
+                        .padding(12)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: CoupleTheme.blush.accentColor.opacity(0.2), radius: 8, y: 4)
                 }
 
                 ShareLink(item: generatedCode) {
                     Label("Share code", systemImage: "square.and.arrow.up")
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(CoupleTheme.blush.accentColor)
 
                 // Manually reading/typing the code is the primary,
                 // required path — QR/deep link is best-effort convenience
@@ -51,6 +63,7 @@ struct CreatePairingView: View {
             }
         }
         .padding()
+        .themedBackground()
         .task {
             await createPairing()
         }

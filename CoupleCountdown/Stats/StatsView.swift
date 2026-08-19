@@ -8,13 +8,17 @@ struct StatsView: View {
     @State private var stats: CumulativeStats?
     @State private var errorMessage: String?
 
+    @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
+    private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
+    private var theme: CoupleTheme { CoupleTheme(rawValue: selectedThemeRaw) ?? .blush }
+
     private let firestore = FirestoreService()
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             if let stats {
-                LabeledContent("Days together", value: stats.totalDaysTogether, format: .number.precision(.fractionLength(0)))
-                LabeledContent("Days apart", value: stats.totalDaysApart, format: .number.precision(.fractionLength(0)))
+                statCard(icon: "heart.fill", label: "Days together", value: stats.totalDaysTogether)
+                statCard(icon: "airplane", label: "Days apart", value: stats.totalDaysApart)
             } else if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
             } else {
@@ -22,10 +26,28 @@ struct StatsView: View {
             }
         }
         .padding()
-        .navigationTitle("Stats")
+        .frame(maxWidth: .infinity)
+        .themedBackground()
+        .navigationTitle("💞 Stats")
         .task {
             await loadStats()
         }
+    }
+
+    private func statCard(icon: String, label: String, value: Double) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(theme.accentColor)
+                .frame(width: 36)
+            Text(label)
+                .font(.system(.body, design: .rounded))
+            Spacer()
+            Text(value, format: .number.precision(.fractionLength(0)))
+                .font(.system(.title2, design: .rounded, weight: .bold))
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func loadStats() async {

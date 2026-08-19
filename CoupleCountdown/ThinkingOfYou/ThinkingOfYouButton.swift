@@ -1,6 +1,7 @@
 // ThinkingOfYouButton.swift — one-tap "thinking of you" nudge (DESIGN.md §7.1)
 
 import SwiftUI
+import CoupleCountdownKit
 
 struct ThinkingOfYouButton: View {
     let coupleId: String
@@ -10,6 +11,10 @@ struct ThinkingOfYouButton: View {
     @State private var didSend = false
     @State private var didFail = false
 
+    @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
+    private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
+    private var theme: CoupleTheme { CoupleTheme(rawValue: selectedThemeRaw) ?? .blush }
+
     private let firestore = FirestoreService()
 
     var body: some View {
@@ -17,9 +22,11 @@ struct ThinkingOfYouButton: View {
             Button {
                 Task { await send() }
             } label: {
-                Label(didSend ? "Sent" : "Thinking of you", systemImage: didSend ? "checkmark" : "heart")
+                Label(didSend ? "Sent, with love" : "Send a little \"thinking of you\"", systemImage: didSend ? "heart.fill" : "paperplane.fill")
+                    .symbolEffect(.bounce, value: didSend)
             }
             .buttonStyle(.bordered)
+            .tint(theme.accentColor)
             .disabled(isSending || authService.uid == nil)
 
             if didFail {

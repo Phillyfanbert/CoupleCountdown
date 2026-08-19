@@ -33,12 +33,23 @@ struct OnboardingView: View {
                     }
                 }
             }
-            .navigationTitle("CoupleCountdown")
+            .themedBackground()
+            .navigationTitle("💕 CoupleCountdown")
         }
+        .tint(CoupleTheme.blush.accentColor)
     }
 
     private var choiceView: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "heart.text.square.fill")
+                .font(.system(size: 56))
+                .foregroundStyle(CoupleTheme.blush.accentColor)
+
+            Text("Let's get you two set up")
+                .font(.system(.title2, design: .rounded, weight: .semibold))
+
             // Heads off the obvious failure mode (DESIGN.md §5.3 point 2)
             // — if both partners mistakenly tap Create, the result is
             // just two unused, self-cleaning couple docs, not corruption,
@@ -47,13 +58,33 @@ struct OnboardingView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
 
-            Button("Create a Pairing") { path = .create }
+            VStack(spacing: 12) {
+                Button {
+                    path = .create
+                } label: {
+                    Label("Create a Pairing", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
 
-            Button("Join a Pairing") { path = .join }
+                Button {
+                    path = .join
+                } label: {
+                    Label("Join a Pairing", systemImage: "envelope.open.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+            Spacer()
         }
         .padding()
     }
