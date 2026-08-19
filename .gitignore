@@ -1,28 +1,79 @@
-# Xcode
-build/
-DerivedData/
+# ============================================================================
+# Principle of least privilege: default-deny.
+#
+# Everything is ignored unless explicitly allowed below. This is the
+# opposite of a typical "ignore known junk" .gitignore — instead of trying
+# to list every kind of file that *shouldn't* be committed (and inevitably
+# missing some new build artifact or local-machine file later), only file
+# types we've deliberately decided belong in version control are tracked.
+#
+# Consequence to be aware of: adding a genuinely new *type* of file to the
+# project (not just a new file of an already-allowed type) means it won't
+# show up in `git status` until a matching "!" rule is added below. That's
+# intentional, not a bug — treat a file silently not appearing as a prompt
+# to check it actually should be tracked before allowing it.
+# ============================================================================
+
+# Ignore everything by default.
+*
+
+# Always descend into directories so the allow-rules below can find files
+# inside them — without this, an ignored directory is never even looked at.
+!*/
+
+# --- Explicitly allowed file types ---
+
+# Documentation
+!*.md
+!LICENSE
+!.gitignore
+
+# Swift source, the local package manifest, and its dependency lockfile
+!*.swift
+!Package.resolved
+
+# Xcode project/target files (once a real .xcodeproj/.xcworkspace exists —
+# none does yet, this just means they'll be tracked correctly when it does)
+!*.pbxproj
+!*.xcworkspacedata
+!*.xcscheme
+!*.entitlements
+!*.xcconfig
+!*.plist
+
+# Asset catalog contents (App Icon, accent color, image sets, etc.)
+!*.json
+!*.png
+!*.pdf
+!*.svg
+!*.jpg
+!*.jpeg
+
+# --- Explicit re-exclusions (narrower than an allow-rule above) ---
+# Order matters: these come after the allow-rules so they win.
+
+# Firebase project config — deliberately kept out of version control
+# (DESIGN.md §5.7) even though it's a .plist and would otherwise match the
+# rule above.
+GoogleService-Info.plist
+
+# Xcode per-user/per-machine state — never portfolio-relevant, never
+# something a second machine should inherit.
+xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
-xcuserdata/
 *.xcscmblueprint
 *.xccheckout
 *.moved-aside
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
 
-# Swift Package Manager
+# Build products & caches — always regenerable, never source.
+build/
+DerivedData/
 .build/
-.swiftpm/
-
-# CocoaPods (not planned, but harmless to ignore if introduced later)
-Pods/
-
-# Firebase — GoogleService-Info.plist is project config, not a secret on the
-# Spark plan, but keep it out of version control by default per §5.7's
-# convention of not committing environment-specific config.
-GoogleService-Info.plist
+.swiftpm/xcode/
+*.dSYM
+*.dSYM.zip
+*.ipa
 
 # macOS
 .DS_Store
