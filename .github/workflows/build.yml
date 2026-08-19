@@ -127,6 +127,13 @@ jobs:
 
       - name: Run XCUITest suite (real Firestore/Auth backend, no mocks)
         run: |
+          # `set -o pipefail`, not assumed default: a prior run proved the
+          # default GitHub Actions bash shell does NOT enable it, so
+          # `xcodebuild test | tee ...` silently reported this step as
+          # green while xcodebuild had actually failed at codesigning
+          # before running a single test — a real false-pass, not a
+          # hypothetical one.
+          set -o pipefail
           mkdir -p logs
           # Reuses the simulator already booted above. Each test launches
           # its own app instance with "-uiTestReset" (see

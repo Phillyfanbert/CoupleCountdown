@@ -94,6 +94,7 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.couplecountdown.app.uitests
       SWIFT_VERSION: "5.0"
+      GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   CoupleCountdown:
