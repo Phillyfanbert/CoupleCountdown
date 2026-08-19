@@ -74,33 +74,47 @@ jobs:
         run: |
           xcrun simctl boot "${{ steps.sim.outputs.udid }}"
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          # One run took ~100s to boot (first-time account/keyboard/video
+          # data migrations) — bootstatus already waits for "Finished",
+          # but a small buffer here guards against installing/launching
+          # into a simulator that reports booted a moment before it's
+          # actually ready.
+          sleep 5
 
           APP_PATH=$(find DerivedData -name "CoupleCountdown.app" -path "*iphonesimulator*" | head -1)
           echo "App bundle: $APP_PATH"
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP_PATH"
 
           mkdir -p logs
-          # --console-pty streams the app's own stdout/stderr (print(),
-          # os_log, uncaught-exception traces) directly — far more useful
-          # than system-wide `log collect`, which failed outright last
-          # run (tried to create logs/system.logarchive as a directory
-          # and errored). Backgrounded with a fixed capture window rather
-          # than blocking, since simctl launch --console-pty runs
-          # indefinitely until the app exits.
-          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" com.couplecountdown.app \
+          # `log stream` is a supplementary diagnostic only — it does NOT
+          # gate pass/fail. Previously `simctl launch --console-pty` was
+          # relied on for both the stream AND the launch confirmation,
+          # and one run killed it via timeout before it ever printed
+          # anything, giving zero signal either way (was it slow, or did
+          # it fail?). Separating the two fixes that ambiguity.
+          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log stream \
+            --level debug --style compact \
+            --predicate 'process == "CoupleCountdown"' \
             > logs/app-console.log 2>&1 &
-          CONSOLE_PID=$!
+          LOG_PID=$!
+          sleep 2
 
-          # Give it time to sign in (real Anonymous Auth network call) and
-          # render — no fixed "app is ready" signal available here, so a
-          # flat wait is the simplest reliable option.
+          # Plain (non-console) launch — this is what every prior
+          # successful run's confirmation line actually came from. Not
+          # backgrounded and not `|| true`: GitHub Actions runs with
+          # `set -e`, so a real launch failure now fails this step
+          # immediately and visibly instead of silently falling through
+          # to a screenshot of the home screen with a misleading "passed"
+          # status.
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.couplecountdown.app
+
           sleep 25
 
           mkdir -p screenshots
           xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot screenshots/app-launch.png
 
-          kill "$CONSOLE_PID" 2>/dev/null || true
-          echo "--- app console output ---"
+          kill "$LOG_PID" 2>/dev/null || true
+          echo "--- app log stream ---"
           cat logs/app-console.log || true
 
       - name: Upload screenshot
