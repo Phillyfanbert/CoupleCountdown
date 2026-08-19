@@ -53,6 +53,20 @@ final class SyncCoordinator: ObservableObject {
         listener = nil
     }
 
+    /// Call right after a local write this device just made (status
+    /// toggle, date change) succeeds, with the resulting state — this is
+    /// what actually makes the acting partner's own widget update
+    /// instantly per §5.2's sync pipeline convention. No network
+    /// round-trip: `lastUpdatedAt` here is the local clock, not the
+    /// server-resolved timestamp; the exact value arrives shortly after
+    /// via the listener/next fetch and harmlessly overwrites this.
+    /// Previously missing entirely — writes only reached the local
+    /// widget by waiting for the listener to echo them back, which is
+    /// exactly the network round-trip §5.2 says shouldn't be needed.
+    func applyLocalWrite(_ state: RelationshipState) {
+        publish(state)
+    }
+
     private func publish(_ newState: RelationshipState) {
         state = newState
         cache.write(newState)

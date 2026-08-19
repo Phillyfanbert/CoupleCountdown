@@ -27,25 +27,42 @@ struct CountdownView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .padding()
-                .navigationTitle("CoupleCountdown")
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink("Stats") { StatsView(coupleId: coupleId) }
-                    }
-                    ToolbarItem(placement: .secondaryAction) {
-                        NavigationLink("Important Dates") { ImportantDatesListView(coupleId: coupleId) }
-                    }
-                    ToolbarItem(placement: .secondaryAction) {
-                        NavigationLink("Settings") { SettingsView() }
-                    }
+            // Was a bare VStack, not a scrollable container — SwiftUI's
+            // .refreshable gesture generally doesn't surface without a
+            // List/ScrollView, so the manual pull-to-refresh fallback
+            // (§5.2 mechanism #5) was effectively unreachable. Wrapping
+            // in ScrollView fixes that without changing the layout for
+            // content that fits on one screen.
+            ScrollView {
+                content
+                    .padding()
+                    .frame(maxWidth: .infinity)
+            }
+            .refreshable {
+                await sync.fetchOnLaunch()
+            }
+            .navigationTitle("CoupleCountdown")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink("Stats") { StatsView(coupleId: coupleId) }
                 }
-        }
-        .refreshable {
-            await sync.fetchOnLaunch()
+                ToolbarItem(placement: .secondaryAction) {
+                    NavigationLink("Important Dates") { ImportantDatesListView(coupleId: coupleId) }
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    NavigationLink("Settings") { SettingsView() }
+                }
+            }
         }
         .task {
+            // .onChange(of: scenePhase) below only fires on a transition,
+            // never for the view's initial value — on a normal launch the
+            // scene is already .active before this view ever appears, so
+            // that "change" is never observed there. Starting the listener
+            // here too is what actually makes §5.2 mechanism #1 (realtime
+            // while both apps are open) engage on a fresh launch instead
+            // of only after a background/foreground cycle.
+            sync.startListening()
             await sync.fetchOnLaunch()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -88,7 +105,7 @@ struct CountdownView: View {
                 }
 
                 Button(state.status == .apart ? "We're together now" : "Leaving again") {
-                    Task { await viewModel.toggleStatus(current: state.status, nextMeetupDate: state.nextMeetupDate) }
+                    Task { await toggleStatus(state: state) }
                 }
                 .buttonStyle(.borderedProminent)
 
@@ -103,21 +120,52 @@ struct CountdownView: View {
         }
     }
 
+    /// Was previously just `Task { await viewModel.toggleStatus(...) }`
+    /// with nothing done on success — the write reached Firestore but
+    /// never reached SyncCoordinator, so the acting partner's own widget
+    /// only updated once the realtime listener happened to echo the
+    /// write back (a network round-trip §5.2 explicitly says shouldn't
+    /// be needed for this exact case).
+    private func toggleStatus(state: RelationshipState) async {
+        let newStatus: RelationshipState.Status = state.status == .apart ? .together : .apart
+        let succeeded = await viewModel.toggleStatus(current: state.status, nextMeetupDate: state.nextMeetupDate)
+        guard succeeded else { return }
+        var updated = state
+        updated.status = newStatus
+        updated.lastUpdatedBy = uid
+        updated.lastUpdatedAt = Date()
+        sync.applyLocalWrite(updated)
+    }
+
     private var datePromptSheet: some View {
         NavigationStack {
             Form {
                 DatePicker("Next meetup", selection: $pendingDate, displayedComponents: .date)
+                // Previously only shown in the underlying view, which is
+                // covered while this sheet is presented — a save failure
+                // here was invisible to the user.
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                }
             }
             .navigationTitle("When do you leave?")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        Task {
-                            await viewModel.setNextMeetupDate(pendingDate, currentStatus: sync.state?.status ?? .together)
-                        }
+                        Task { await saveDate() }
                     }
                 }
             }
         }
+    }
+
+    private func saveDate() async {
+        let succeeded = await viewModel.setNextMeetupDate(pendingDate, currentStatus: sync.state?.status ?? .together)
+        guard succeeded, var updated = sync.state else { return }
+        updated.status = .apart
+        updated.nextMeetupDate = pendingDate
+        updated.lastUpdatedBy = uid
+        updated.lastUpdatedAt = Date()
+        sync.applyLocalWrite(updated)
     }
 }
