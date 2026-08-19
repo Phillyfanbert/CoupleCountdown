@@ -32,13 +32,73 @@ jobs:
             -project CoupleCountdown.xcodeproj \
             -scheme CoupleCountdown
 
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for runtime, devices in data['devices'].items():
+              if 'iOS' not in runtime:
+                  continue
+              for d in devices:
+                  if 'iPhone' in d['name']:
+                      print(d['udid'])
+                      sys.exit(0)
+          sys.exit(1)
+          ")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep "$UDID"
+
       - name: Build for iOS Simulator (no code signing)
         run: |
           xcodebuild build \
             -project CoupleCountdown.xcodeproj \
             -scheme CoupleCountdown \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Boot simulator, install, launch, and screenshot the app
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}"
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+
+          APP_PATH=$(find DerivedData -name "CoupleCountdown.app" -path "*iphonesimulator*" | head -1)
+          echo "App bundle: $APP_PATH"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP_PATH"
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.couplecountdown.app
+
+          # Give it time to sign in (real Anonymous Auth network call) and
+          # render — no fixed "app is ready" signal available here, so a
+          # flat wait is the simplest reliable option.
+          sleep 12
+
+          mkdir -p screenshots
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot screenshots/app-launch.png
+
+      - name: Collect simulator + crash logs (always, for diagnosis)
+        if: always()
+        run: |
+          mkdir -p logs
+          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log collect --output logs/system.logarchive || true
+          cp -r ~/Library/Logs/DiagnosticReports logs/crash-reports 2>/dev/null || true
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-screenshot
+          path: screenshots/
+          if-no-files-found: warn
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-logs
+          path: logs/
+          if-no-files-found: ignore
 
   test-kit-package:
     name: Run CoupleCountdownKit unit tests
