@@ -18,7 +18,9 @@ struct StatsView: View {
         VStack(spacing: 20) {
             if let stats {
                 statCard(icon: "heart.fill", label: "Days together", value: stats.totalDaysTogether)
+                    .accessibilityIdentifier("daysTogetherStat")
                 statCard(icon: "airplane", label: "Days apart", value: stats.totalDaysApart)
+                    .accessibilityIdentifier("daysApartStat")
             } else if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
             } else {

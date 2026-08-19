@@ -31,6 +31,7 @@ struct CreatePairingView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 8)
                     .background(CoupleTheme.blush.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .accessibilityIdentifier("generatedCodeText")
 
                 if let qrImage = Self.qrCode(for: "couplecountdown://join/\(generatedCode)") {
                     Image(uiImage: qrImage)

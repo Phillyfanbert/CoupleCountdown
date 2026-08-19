@@ -65,6 +65,33 @@ final class CumulativeStatsCalculatorTests: XCTestCase {
     }
 }
 
+final class MilestoneCheckerTests: XCTestCase {
+    func testCountdownReachedZeroWhenDatePassedAndApart() {
+        let past = Date().addingTimeInterval(-60)
+        XCTAssertTrue(MilestoneChecker.countdownReachedZero(nextMeetupDate: past, status: .apart))
+    }
+
+    func testCountdownNotReachedZeroWhenDateInFuture() {
+        let future = Date().addingTimeInterval(60)
+        XCTAssertFalse(MilestoneChecker.countdownReachedZero(nextMeetupDate: future, status: .apart))
+    }
+
+    func testCountdownReachedZeroFalseWhenAlreadyTogether() {
+        let past = Date().addingTimeInterval(-60)
+        XCTAssertFalse(MilestoneChecker.countdownReachedZero(nextMeetupDate: past, status: .together))
+    }
+
+    func testCountdownReachedZeroFalseWhenNoDateSet() {
+        XCTAssertFalse(MilestoneChecker.countdownReachedZero(nextMeetupDate: nil, status: .apart))
+    }
+
+    func testRoundDayMilestoneReachedPicksLargestQualifying() {
+        XCTAssertEqual(MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: 150), 100)
+        XCTAssertEqual(MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: 6.9), nil)
+        XCTAssertEqual(MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: 1200), 1000)
+    }
+}
+
 final class AppGroupCacheTests: XCTestCase {
     func testWriteThenReadRoundTrips() {
         // A suite name with no real App Group entitlement still works for

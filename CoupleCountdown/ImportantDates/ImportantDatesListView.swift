@@ -38,6 +38,8 @@ struct ImportantDatesListView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("importantDateRow_\(date.label)")
             }
         }
         .scrollContentBackground(.hidden)
@@ -47,6 +49,7 @@ struct ImportantDatesListView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button("Add", systemImage: "plus") { isShowingAddSheet = true }
                     .tint(theme.accentColor)
+                    .accessibilityIdentifier("addImportantDateButton")
             }
         }
         .sheet(isPresented: $isShowingAddSheet) {

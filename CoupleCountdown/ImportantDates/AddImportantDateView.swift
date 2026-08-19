@@ -22,8 +22,11 @@ struct AddImportantDateView: View {
         NavigationStack {
             Form {
                 TextField("Label (e.g. Anniversary)", text: $label)
+                    .accessibilityIdentifier("dateLabelTextField")
                 DatePicker("Date", selection: $date, displayedComponents: .date)
+                    .accessibilityIdentifier("importantDatePicker")
                 Toggle("Repeats every year", isOn: $repeatsAnnually)
+                    .accessibilityIdentifier("repeatsAnnuallyToggle")
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(.red).font(.caption)
                 }
@@ -35,6 +38,7 @@ struct AddImportantDateView: View {
                         Task { await save() }
                     }
                     .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    .accessibilityIdentifier("saveImportantDateButton")
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

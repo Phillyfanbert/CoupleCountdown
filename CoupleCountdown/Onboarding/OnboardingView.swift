@@ -70,6 +70,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .accessibilityIdentifier("createPairingButton")
 
                 Button {
                     path = .join
@@ -80,6 +81,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                .accessibilityIdentifier("joinPairingButton")
             }
             .padding(.horizontal, 32)
 

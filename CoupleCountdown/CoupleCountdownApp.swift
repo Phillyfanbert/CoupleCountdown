@@ -16,6 +16,15 @@ struct CoupleCountdownApp: App {
 
     init() {
         FirebaseApp.configure()
+        // Gated behind a launch argument only XCUITest ever passes (see
+        // CoupleCountdownUITests) — lets each test start from a genuinely
+        // fresh identity/pairing instead of whatever the App Group suite
+        // and Keychain were left holding by a previous test or launch.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
+            try? Auth.auth().signOut()
+            UserDefaults(suiteName: SharedIdentifiers.appGroup)?.removePersistentDomain(forName: SharedIdentifiers.appGroup)
+            KeychainStore(accessGroup: SharedIdentifiers.keychainAccessGroup).delete()
+        }
     }
 
     var body: some Scene {

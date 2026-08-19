@@ -83,3 +83,26 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.couplecountdown.app.widget
       SWIFT_VERSION: "5.0"
+
+  CoupleCountdownUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: CoupleCountdownUITests
+    dependencies:
+      - target: CoupleCountdown
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.couplecountdown.app.uitests
+      SWIFT_VERSION: "5.0"
+
+schemes:
+  CoupleCountdown:
+    build:
+      targets:
+        CoupleCountdown: all
+        CoupleCountdownUITests: [test]
+    test:
+      targets:
+        - CoupleCountdownUITests
+    run:
+      config: Debug

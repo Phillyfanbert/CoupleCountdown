@@ -28,6 +28,7 @@ struct ThinkingOfYouButton: View {
             .buttonStyle(.bordered)
             .tint(theme.accentColor)
             .disabled(isSending || authService.uid == nil)
+            .accessibilityIdentifier("thinkingOfYouButton")
 
             if didFail {
                 Text("Couldn't send — try again").font(.caption).foregroundStyle(.red)

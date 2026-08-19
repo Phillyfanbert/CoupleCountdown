@@ -30,6 +30,8 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("theme_\(theme.rawValue)")
+                    .accessibilityAddTraits(selectedTheme == theme.rawValue ? .isSelected : [])
                 }
             }
         }

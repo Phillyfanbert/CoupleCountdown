@@ -31,12 +31,14 @@ struct JoinPairingView: View {
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 40)
+                .accessibilityIdentifier("joinCodeTextField")
 
             if isJoining {
                 ProgressView()
             }
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
+                    .accessibilityIdentifier("joinErrorText")
             }
 
             Button {
@@ -50,6 +52,7 @@ struct JoinPairingView: View {
             .controlSize(.large)
             .padding(.horizontal, 32)
             .disabled(enteredCode.trimmingCharacters(in: .whitespaces).isEmpty || isJoining)
+            .accessibilityIdentifier("joinButton")
 
             Spacer()
             Spacer()

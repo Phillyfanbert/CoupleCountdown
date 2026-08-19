@@ -22,11 +22,13 @@ struct DisplayNameEntryView: View {
                 .font(.system(.body, design: .rounded))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+                .accessibilityIdentifier("nameTextField")
 
             Button("Continue", action: onContinue)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(displayName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("continueButton")
 
             Spacer()
             Spacer()

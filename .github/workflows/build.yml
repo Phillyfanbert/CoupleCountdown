@@ -125,6 +125,32 @@ jobs:
           path: screenshots/
           if-no-files-found: warn
 
+      - name: Run XCUITest suite (real Firestore/Auth backend, no mocks)
+        run: |
+          mkdir -p logs
+          # Reuses the simulator already booted above. Each test launches
+          # its own app instance with "-uiTestReset" (see
+          # CoupleCountdownApp.init()), so tests don't depend on each
+          # other or on the screenshot step's launch above.
+          xcodebuild test \
+            -project CoupleCountdown.xcodeproj \
+            -scheme CoupleCountdown \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            | tee logs/uitest-output.log
+
+      - name: Upload UI test result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uitest-results
+          path: TestResults.xcresult
+          if-no-files-found: warn
+
       - name: Upload diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4

@@ -12,15 +12,27 @@ struct CountdownView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var pendingDate = Date().addingTimeInterval(7 * 86_400)
+    @State private var celebrationMessage: String?
+
+    // Tracks which milestones have already been shown, so reopening the
+    // app or the view reloading doesn't re-celebrate the same one every
+    // time (DESIGN.md §7.3 never specified this, but the alternative —
+    // celebrating "100 days!" on every launch — would be more annoying
+    // than delightful).
+    @AppStorage("celebratedMilestones", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
+    private var celebratedMilestonesRaw: String = ""
 
     @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
     private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
     private var theme: CoupleTheme { CoupleTheme(rawValue: selectedThemeRaw) ?? .blush }
 
+    private let firestore: FirestoreService
+
     init(coupleId: String, uid: String) {
         self.coupleId = coupleId
         self.uid = uid
         let firestore = FirestoreService()
+        self.firestore = firestore
         _sync = StateObject(wrappedValue: SyncCoordinator(
             firestore: firestore,
             cache: AppGroupCache(suiteName: SharedIdentifiers.appGroup),
@@ -53,21 +65,36 @@ struct CountdownView: View {
                     NavigationLink { StatsView(coupleId: coupleId) } label: {
                         Image(systemName: "chart.bar.fill")
                     }
+                    .accessibilityIdentifier("statsNavLink")
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink { ImportantDatesListView(coupleId: coupleId) } label: {
                         Label("Important Dates", systemImage: "calendar.badge.clock")
                     }
+                    .accessibilityIdentifier("importantDatesNavLink")
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink { SettingsView() } label: {
                         Label("Settings", systemImage: "paintpalette.fill")
                     }
+                    .accessibilityIdentifier("settingsNavLink")
                 }
             }
         }
         .tint(theme.accentColor)
         .task {
+            // Gated behind a launch argument only XCUITest ever passes —
+            // real milestone triggering needs either elapsed real time or
+            // a past nextMeetupDate, neither practical to arrange from a
+            // UI test. This verifies the overlay itself (render, tap to
+            // dismiss, auto-dismiss) actually works when wired up, which
+            // is exactly the kind of thing that can silently break
+            // (covered behind other content, gesture not registering)
+            // without ever showing up in MilestoneChecker's own unit
+            // tests, which only cover the detection logic in isolation.
+            if ProcessInfo.processInfo.arguments.contains("-uiTestForceCelebration") {
+                celebrationMessage = "Test celebration! 🎉"
+            }
             // .onChange(of: scenePhase) below only fires on a transition,
             // never for the view's initial value — on a normal launch the
             // scene is already .active before this view ever appears, so
@@ -86,8 +113,19 @@ struct CountdownView: View {
                 sync.stopListening()
             }
         }
+        .onChange(of: sync.state) { _, newState in
+            guard let newState else { return }
+            Task { await checkForMilestones(state: newState) }
+        }
         .sheet(isPresented: $viewModel.promptForDate) {
             datePromptSheet
+        }
+        .overlay {
+            if let celebrationMessage {
+                MilestoneCelebrationView(message: celebrationMessage) {
+                    self.celebrationMessage = nil
+                }
+            }
         }
     }
 
@@ -112,11 +150,13 @@ struct CountdownView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(theme.accentColor)
                 .controlSize(.large)
+                .accessibilityIdentifier("toggleStatusButton")
 
                 ThinkingOfYouButton(coupleId: coupleId)
             } else {
                 ProgressView("Loading…")
                     .padding(.top, 80)
+                    .accessibilityIdentifier("countdownLoadingIndicator")
             }
 
             if let errorMessage = viewModel.errorMessage {
@@ -137,6 +177,7 @@ struct CountdownView: View {
                     .contentTransition(.numericText())
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
+                    .accessibilityIdentifier("countdownText")
             } else {
                 // No-date-set state applies immediately after pairing
                 // too, not just the "leaving again" edge case (§6, §8).
@@ -146,6 +187,7 @@ struct CountdownView: View {
                 Text("No date set yet")
                     .font(.headline)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("noDateSetText")
             }
         }
         .padding(24)
@@ -165,6 +207,7 @@ struct CountdownView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(theme.accentColor.opacity(0.15), in: Capsule())
+        .accessibilityIdentifier("statusBadge")
     }
 
     @ViewBuilder
@@ -206,6 +249,7 @@ struct CountdownView: View {
         NavigationStack {
             Form {
                 DatePicker("Next meetup", selection: $pendingDate, displayedComponents: .date)
+                    .accessibilityIdentifier("nextMeetupDatePicker")
                 // Previously only shown in the underlying view, which is
                 // covered while this sheet is presented — a save failure
                 // here was invisible to the user.
@@ -220,6 +264,7 @@ struct CountdownView: View {
                         Task { await saveDate() }
                     }
                     .tint(theme.accentColor)
+                    .accessibilityIdentifier("saveDateButton")
                 }
             }
         }
@@ -233,5 +278,37 @@ struct CountdownView: View {
         updated.lastUpdatedBy = uid
         updated.lastUpdatedAt = Date()
         sync.applyLocalWrite(updated)
+    }
+
+    // MARK: - Milestone celebration (§7.3)
+
+    private func checkForMilestones(state: RelationshipState) async {
+        var celebrated = Set(celebratedMilestonesRaw.split(separator: ",").map(String.init))
+
+        if MilestoneChecker.countdownReachedZero(nextMeetupDate: state.nextMeetupDate, status: state.status) {
+            let key = "zero-\(Int(state.nextMeetupDate?.timeIntervalSince1970 ?? 0))"
+            if !celebrated.contains(key) {
+                celebrated.insert(key)
+                celebrationMessage = "You're together again! 🎉"
+            }
+        }
+
+        if let events = try? await firestore.fetchEvents(coupleId: coupleId) {
+            let stats = CumulativeStatsCalculator.calculate(events: events)
+            if let milestone = MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: stats.totalDaysTogether) {
+                let key = "days-\(milestone)"
+                if !celebrated.contains(key) {
+                    celebrated.insert(key)
+                    // Only overwrite the countdown-reached-zero message if
+                    // that one didn't already fire this pass — both firing
+                    // at once is an edge case not worth stacking UI for.
+                    if celebrationMessage == nil {
+                        celebrationMessage = "\(milestone) days together! 🎉"
+                    }
+                }
+            }
+        }
+
+        celebratedMilestonesRaw = celebrated.joined(separator: ",")
     }
 }
