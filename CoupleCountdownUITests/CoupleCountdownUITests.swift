@@ -60,7 +60,7 @@ final class CoupleCountdownUITests: XCTestCase {
     /// directly, confirmed via a real failed run's accessibility snapshot.
     /// statsNavLink is .primaryAction and stays directly tappable, which
     /// is why only these two needed this.
-    private func tapToolbarItem(_ app: XCUIApplication, identifier: String) {
+    private func tapToolbarItem(_ app: XCUIApplication, identifier: String, label: String) {
         let direct = app.buttons[identifier]
         if direct.waitForExistence(timeout: 2) {
             direct.tap()
@@ -69,8 +69,15 @@ final class CoupleCountdownUITests: XCTestCase {
         let overflow = app.buttons["OverflowBarButtonItem"]
         XCTAssertTrue(overflow.waitForExistence(timeout: 5), "Neither \"\(identifier)\" nor the toolbar overflow button was found")
         overflow.tap()
-        let item = app.descendants(matching: .any)[identifier]
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "\"\(identifier)\" wasn't in the overflow menu either")
+        // A real run showed identifier-only matching (scoped to `.any`'s
+        // default identifier-only subscript behavior) didn't find the item
+        // once inside the overflow menu — its exact XCUIElementType and
+        // whether the SwiftUI accessibilityIdentifier survives UIKit's
+        // overflow-menu synthesis are both unconfirmed, so match broadly
+        // by either identifier or the visible label text instead.
+        let predicate = NSPredicate(format: "identifier == %@ OR label == %@", identifier, label)
+        let item = app.descendants(matching: .any).matching(predicate).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "\"\(identifier)\" (\"\(label)\") wasn't found in the overflow menu either")
         item.tap()
     }
 
@@ -165,7 +172,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        tapToolbarItem(app, identifier: "importantDatesNavLink")
+        tapToolbarItem(app, identifier: "importantDatesNavLink", label: "Important Dates")
 
         let addButton = app.buttons["addImportantDateButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 10))
@@ -178,8 +185,13 @@ final class CoupleCountdownUITests: XCTestCase {
 
         app.buttons["saveImportantDateButton"].tap()
 
+        // .otherElements assumed the wrong resolved type for another
+        // .accessibilityElement(children: .combine) view elsewhere in this
+        // suite (see testMilestoneCelebrationShowsAndDismissesOnTap) —
+        // search by identifier across any type here too, with the label
+        // text as a second fallback.
         let row = app.staticTexts["Anniversary"].firstMatch
-        let rowExists = app.otherElements["importantDateRow_Anniversary"].waitForExistence(timeout: 15)
+        let rowExists = app.descendants(matching: .any)["importantDateRow_Anniversary"].waitForExistence(timeout: 15)
             || row.waitForExistence(timeout: 5)
         XCTAssertTrue(rowExists, "Saved important date never appeared back in the list — addImportantDate() write or the subsequent reload likely failed")
     }
@@ -204,7 +216,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        tapToolbarItem(app, identifier: "settingsNavLink")
+        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
 
         let sunsetRow = app.buttons["theme_sunset"]
         XCTAssertTrue(sunsetRow.waitForExistence(timeout: 10))
@@ -235,7 +247,12 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp(forceCelebration: true)
         completeOnboardingByCreating(app)
 
-        let celebration = app.otherElements["milestoneCelebration"]
+        // Scoped to .otherElements this failed on a real run even with a
+        // generous 30s auto-dismiss window under test — .accessibilityElement
+        // (children: .combine) on a Text-only VStack doesn't reliably
+        // resolve to XCUIElementType.other, so search by identifier across
+        // any element type instead of guessing the resolved type.
+        let celebration = app.descendants(matching: .any)["milestoneCelebration"]
         XCTAssertTrue(celebration.waitForExistence(timeout: 10), "Forced celebration overlay never appeared")
 
         celebration.tap()
