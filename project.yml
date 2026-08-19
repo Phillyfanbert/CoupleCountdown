@@ -36,6 +36,8 @@ targets:
         product: FirebaseFirestore
       - package: Firebase
         product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAnalytics
       - target: CoupleCountdownWidgetExtension
         embed: true
     info:

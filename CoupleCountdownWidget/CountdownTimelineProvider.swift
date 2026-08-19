@@ -11,11 +11,13 @@ struct CountdownEntry: TimelineEntry {
 struct CountdownTimelineProvider: TimelineProvider {
     private let cache = AppGroupCache(suiteName: SharedIdentifiers.appGroup)
 
-    // Placeholders until the real Firebase project exists (§5.7) — the
-    // project ID and Web API key aren't secrets, but they don't exist yet.
+    // Real values from the Firebase project (couplecountdown-7715c) —
+    // neither is a secret (DESIGN.md §5.7 discussion, Firebase's own docs:
+    // the Web API key is a public identifier, not a credential; access
+    // control comes entirely from the tested Security Rules).
     private let client = WidgetFirestoreClient(
-        projectId: "REPLACE_WITH_FIREBASE_PROJECT_ID",
-        tokenProvider: WidgetAuthTokenProvider(apiKey: "REPLACE_WITH_FIREBASE_WEB_API_KEY")
+        projectId: "couplecountdown-7715c",
+        tokenProvider: WidgetAuthTokenProvider(apiKey: "AIzaSyCCo8NgjVwz6-P1lW6H1CKqGadyKwSA384")
     )
 
     func placeholder(in context: Context) -> CountdownEntry {

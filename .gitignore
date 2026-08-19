@@ -63,10 +63,13 @@
 # --- Explicit re-exclusions (narrower than an allow-rule above) ---
 # Order matters: these come after the allow-rules so they win.
 
-# Firebase project config — deliberately kept out of version control
-# (DESIGN.md §5.7) even though it's a .plist and would otherwise match the
-# rule above.
-GoogleService-Info.plist
+# GoogleService-Info.plist is intentionally tracked, not excluded here —
+# reversed from the original DESIGN.md §5.7 assumption. Every field in it
+# (API key, project ID, bundle ID, GCM sender ID) is confirmed non-secret
+# by Firebase's own docs; the API key is a public project identifier, not
+# a credential — access control comes entirely from the tested Security
+# Rules, not from hiding this file. Keeping it out of git would also break
+# CI, which checks out only tracked files and has no other way to obtain it.
 
 # Node.js dependencies & Firebase emulator artifacts — regenerable, never
 # source. node_modules/ is the big one: without this, the broad `!*.js`

@@ -154,9 +154,13 @@ final class FirestoreService {
     // MARK: - Thinking of you (§7.1)
 
     func sendPing(coupleId: String, uid: String) async throws {
+        // expiresAt is computed client-side (server timestamp isn't known
+        // until the write resolves) — fine, since a few seconds of clock
+        // skew is irrelevant against a multi-day TTL window.
         try await coupleRef(coupleId).collection("pings").addDocument(data: [
             "sentBy": uid,
             "sentAt": FieldValue.serverTimestamp(),
+            "expiresAt": Timestamp(date: Date().addingTimeInterval(ThinkingOfYouPing.lifetime)),
         ])
     }
 
