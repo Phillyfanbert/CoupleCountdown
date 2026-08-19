@@ -122,7 +122,15 @@ struct CountdownView: View {
         }
         .overlay {
             if let celebrationMessage {
-                MilestoneCelebrationView(message: celebrationMessage) {
+                // Real users get the deliberately brief default (4s) —
+                // under XCUITest that same window raced against real
+                // network/automation overhead (app-idle waits, the
+                // Firestore round-trip in checkForMilestones) and the
+                // overlay was reliably gone before a test ever got around
+                // to checking for it. A longer delay only under the test
+                // flag fixes the race without touching real UX timing.
+                let autoDismissDelay: Duration = ProcessInfo.processInfo.arguments.contains("-uiTestForceCelebration") ? .seconds(30) : .seconds(4)
+                MilestoneCelebrationView(message: celebrationMessage, autoDismissDelay: autoDismissDelay) {
                     self.celebrationMessage = nil
                 }
             }

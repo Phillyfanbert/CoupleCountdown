@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MilestoneCelebrationView: View {
     let message: String
+    var autoDismissDelay: Duration = .seconds(4)
     let onDismiss: () -> Void
 
     var body: some View {
@@ -23,7 +24,7 @@ struct MilestoneCelebrationView: View {
         .accessibilityIdentifier("milestoneCelebration")
         .onTapGesture(perform: onDismiss)
         .task {
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: autoDismissDelay)
             onDismiss()
         }
     }

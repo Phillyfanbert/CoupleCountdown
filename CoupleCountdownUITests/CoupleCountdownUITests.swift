@@ -53,6 +53,27 @@ final class CoupleCountdownUITests: XCTestCase {
         return code
     }
 
+    /// CountdownView's toolbar puts importantDatesNavLink/settingsNavLink
+    /// at .secondaryAction placement — on the iPhone widths CI runs
+    /// against, iOS collapses those into a "More" overflow button
+    /// (identifier "OverflowBarButtonItem") rather than showing them
+    /// directly, confirmed via a real failed run's accessibility snapshot.
+    /// statsNavLink is .primaryAction and stays directly tappable, which
+    /// is why only these two needed this.
+    private func tapToolbarItem(_ app: XCUIApplication, identifier: String) {
+        let direct = app.buttons[identifier]
+        if direct.waitForExistence(timeout: 2) {
+            direct.tap()
+            return
+        }
+        let overflow = app.buttons["OverflowBarButtonItem"]
+        XCTAssertTrue(overflow.waitForExistence(timeout: 5), "Neither \"\(identifier)\" nor the toolbar overflow button was found")
+        overflow.tap()
+        let item = app.descendants(matching: .any)[identifier]
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "\"\(identifier)\" wasn't in the overflow menu either")
+        item.tap()
+    }
+
     // MARK: - Onboarding
 
     func testCreatePairingGeneratesJoinCode() {
@@ -144,7 +165,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        app.buttons["importantDatesNavLink"].tap()
+        tapToolbarItem(app, identifier: "importantDatesNavLink")
 
         let addButton = app.buttons["addImportantDateButton"]
         XCTAssertTrue(addButton.waitForExistence(timeout: 10))
@@ -183,7 +204,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        app.buttons["settingsNavLink"].tap()
+        tapToolbarItem(app, identifier: "settingsNavLink")
 
         let sunsetRow = app.buttons["theme_sunset"]
         XCTAssertTrue(sunsetRow.waitForExistence(timeout: 10))
