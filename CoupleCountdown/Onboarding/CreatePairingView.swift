@@ -57,6 +57,29 @@ struct CreatePairingView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
+
+                // Setting `coupleId` is what advances past onboarding —
+                // it's bound all the way up to CoupleCountdownApp's
+                // @AppStorage, so the instant it's set the whole app's
+                // root view swaps to CountdownView. createPairing() used
+                // to set it in the same breath as generatedCode, which
+                // left ~0 real time to read/copy/share the code before it
+                // vanished (caught by XCUITest: the code screen was
+                // already gone by the time a test checked for it, only
+                // seconds after the write completed). Requiring this tap
+                // is what actually gives the code screen a real, user-
+                // controlled lifetime.
+                Button {
+                    coupleId = generatedCode
+                } label: {
+                    Label("Continue", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(CoupleTheme.blush.accentColor)
+                .accessibilityIdentifier("continueToCountdownButton")
             } else if isCreating {
                 ProgressView("Creating…")
             } else if let errorMessage {
@@ -84,8 +107,9 @@ struct CreatePairingView: View {
                 displayName: displayName,
                 timeZoneIdentifier: TimeZone.current.identifier
             )
+            // Deliberately not also setting coupleId here — see the
+            // Continue button below.
             generatedCode = code
-            coupleId = code
         } catch {
             errorMessage = error.localizedDescription
         }

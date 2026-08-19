@@ -48,6 +48,8 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTAssertTrue(codeText.waitForExistence(timeout: 15), "Pairing code was never generated — createCouple() Firestore write likely failed")
         let code = codeText.label
         XCTAssertEqual(code.count, 6, "Join code should be 6 characters, got \"\(code)\"")
+
+        app.buttons["continueToCountdownButton"].tap()
         return code
     }
 
@@ -56,6 +58,29 @@ final class CoupleCountdownUITests: XCTestCase {
     func testCreatePairingGeneratesJoinCode() {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
+    }
+
+    func testCreatePairingCodeStaysVisibleUntilContinueIsTapped() {
+        // Regression coverage for a real bug this suite caught: setting
+        // coupleId as soon as the Firestore write succeeded advanced the
+        // whole app past this screen before a user could ever read, copy,
+        // or share the code (see CreatePairingView.createPairing()).
+        let app = launchFreshApp()
+        let nameField = app.textFields["nameTextField"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
+        nameField.tap()
+        nameField.typeText("Alex")
+        app.buttons["continueButton"].tap()
+        app.buttons["createPairingButton"].tap()
+
+        let codeText = app.staticTexts["generatedCodeText"]
+        XCTAssertTrue(codeText.waitForExistence(timeout: 15))
+
+        // Give the app every opportunity to have wrongly auto-advanced;
+        // the code screen (and its Continue button) should still be here.
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertTrue(codeText.exists, "Generated code screen should stay visible until the user taps Continue")
+        XCTAssertTrue(app.buttons["continueToCountdownButton"].exists)
     }
 
     func testJoinPairingWithInvalidCodeShowsError() {
