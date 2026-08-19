@@ -8,28 +8,46 @@ struct ThinkingOfYouButton: View {
     @EnvironmentObject private var authService: AuthService
     @State private var isSending = false
     @State private var didSend = false
+    @State private var didFail = false
 
     private let firestore = FirestoreService()
 
     var body: some View {
-        Button {
-            Task { await send() }
-        } label: {
-            Label(didSend ? "Sent" : "Thinking of you", systemImage: didSend ? "checkmark" : "heart")
+        VStack(spacing: 4) {
+            Button {
+                Task { await send() }
+            } label: {
+                Label(didSend ? "Sent" : "Thinking of you", systemImage: didSend ? "checkmark" : "heart")
+            }
+            .buttonStyle(.bordered)
+            .disabled(isSending || authService.uid == nil)
+
+            if didFail {
+                Text("Couldn't send — try again").font(.caption).foregroundStyle(.red)
+            }
         }
-        .buttonStyle(.bordered)
-        .disabled(isSending || authService.uid == nil)
     }
 
     private func send() async {
         guard let uid = authService.uid else { return }
         isSending = true
-        // Not an instant push (DESIGN.md §2, §5.4) — this only surfaces
-        // to the partner next time their app or widget refreshes.
-        try? await firestore.sendPing(coupleId: coupleId, uid: uid)
+        didFail = false
+        do {
+            // Not an instant push (DESIGN.md §2, §5.4) — this only
+            // surfaces to the partner next time their app or widget
+            // refreshes.
+            try await firestore.sendPing(coupleId: coupleId, uid: uid)
+            // Only show "Sent" if the write actually succeeded —
+            // previously this fired unconditionally, so a failed send
+            // looked identical to a successful one.
+            didSend = true
+        } catch {
+            didFail = true
+        }
         isSending = false
-        didSend = true
-        try? await Task.sleep(for: .seconds(2))
-        didSend = false
+        if didSend {
+            try? await Task.sleep(for: .seconds(2))
+            didSend = false
+        }
     }
 }

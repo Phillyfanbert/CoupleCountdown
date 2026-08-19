@@ -14,6 +14,7 @@ struct AddImportantDateView: View {
     @State private var date = Date()
     @State private var repeatsAnnually = true
     @State private var isSaving = false
+    @State private var errorMessage: String?
 
     private let firestore = FirestoreService()
 
@@ -23,6 +24,9 @@ struct AddImportantDateView: View {
                 TextField("Label (e.g. Anniversary)", text: $label)
                 DatePicker("Date", selection: $date, displayedComponents: .date)
                 Toggle("Repeats every year", isOn: $repeatsAnnually)
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(.red).font(.caption)
+                }
             }
             .navigationTitle("Add Important Date")
             .toolbar {
@@ -42,6 +46,7 @@ struct AddImportantDateView: View {
     private func save() async {
         guard let uid = authService.uid else { return }
         isSaving = true
+        errorMessage = nil
         // Deliberately separate from RelationshipState/nextMeetupDate —
         // informational countdowns, not tied to the apart/together state
         // machine (§7.4).
@@ -52,9 +57,16 @@ struct AddImportantDateView: View {
             repeatsAnnually: repeatsAnnually,
             createdBy: uid
         )
-        try? await firestore.addImportantDate(newDate, coupleId: coupleId)
+        do {
+            try await firestore.addImportantDate(newDate, coupleId: coupleId)
+            // Only report success and dismiss if the write actually
+            // succeeded — previously this ran unconditionally, so a
+            // failed save looked identical to a successful one.
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = "Couldn't save — check your connection and try again."
+        }
         isSaving = false
-        onSaved()
-        dismiss()
     }
 }

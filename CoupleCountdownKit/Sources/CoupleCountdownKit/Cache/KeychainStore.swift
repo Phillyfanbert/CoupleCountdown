@@ -18,12 +18,20 @@ public struct KeychainStore {
         self.account = account
     }
 
-    public func write(_ value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    /// Returns whether the write actually succeeded — callers that care
+    /// about silent Keychain failures (e.g. entitlement issues, the same
+    /// class of bug that caused Firebase Auth's own Keychain write to
+    /// fail during CI verification) should check this rather than assume
+    /// success, per `@discardableResult` for the callers that don't need
+    /// to.
+    @discardableResult
+    public func write(_ value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
         SecItemDelete(baseQuery() as CFDictionary) // clear any existing value first
         var query = baseQuery()
         query[kSecValueData as String] = data
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        return status == errSecSuccess
     }
 
     public func read() -> String? {

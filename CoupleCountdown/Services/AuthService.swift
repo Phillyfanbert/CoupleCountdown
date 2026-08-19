@@ -39,6 +39,12 @@ final class AuthService: ObservableObject {
 
     private func persistRefreshToken(for user: User) {
         guard let refreshToken = user.refreshToken else { return }
-        keychain.write(refreshToken)
+        if !keychain.write(refreshToken) {
+            // Same visibility principle as signInIfNeeded()'s error above
+            // — a silent failure here would mean the widget can never
+            // authenticate independently, with no way to tell why (§5.5's
+            // Keychain Sharing risk, §10).
+            print("KeychainStore.write() failed to persist the refresh token — the widget will not be able to authenticate independently.")
+        }
     }
 }
