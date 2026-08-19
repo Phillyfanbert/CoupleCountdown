@@ -67,22 +67,30 @@ jobs:
           APP_PATH=$(find DerivedData -name "CoupleCountdown.app" -path "*iphonesimulator*" | head -1)
           echo "App bundle: $APP_PATH"
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP_PATH"
-          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.couplecountdown.app
+
+          mkdir -p logs
+          # --console-pty streams the app's own stdout/stderr (print(),
+          # os_log, uncaught-exception traces) directly — far more useful
+          # than system-wide `log collect`, which failed outright last
+          # run (tried to create logs/system.logarchive as a directory
+          # and errored). Backgrounded with a fixed capture window rather
+          # than blocking, since simctl launch --console-pty runs
+          # indefinitely until the app exits.
+          xcrun simctl launch --console-pty "${{ steps.sim.outputs.udid }}" com.couplecountdown.app \
+            > logs/app-console.log 2>&1 &
+          CONSOLE_PID=$!
 
           # Give it time to sign in (real Anonymous Auth network call) and
           # render — no fixed "app is ready" signal available here, so a
           # flat wait is the simplest reliable option.
-          sleep 12
+          sleep 25
 
           mkdir -p screenshots
           xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot screenshots/app-launch.png
 
-      - name: Collect simulator + crash logs (always, for diagnosis)
-        if: always()
-        run: |
-          mkdir -p logs
-          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log collect --output logs/system.logarchive || true
-          cp -r ~/Library/Logs/DiagnosticReports logs/crash-reports 2>/dev/null || true
+          kill "$CONSOLE_PID" 2>/dev/null || true
+          echo "--- app console output ---"
+          cat logs/app-console.log || true
 
       - name: Upload screenshot
         if: always()

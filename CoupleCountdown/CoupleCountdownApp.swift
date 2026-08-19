@@ -24,7 +24,16 @@ struct CoupleCountdownApp: App {
                 if authService.uid == nil {
                     ProgressView("Signing in…")
                         .task {
-                            try? await authService.signInIfNeeded()
+                            do {
+                                try await authService.signInIfNeeded()
+                            } catch {
+                                // Deliberately not swallowed via `try?` —
+                                // a silent failure here means the app is
+                                // stuck on this screen forever with no
+                                // way to tell why (caught exactly this
+                                // way during CI Simulator verification).
+                                print("AuthService.signInIfNeeded() failed: \(error)")
+                            }
                         }
                 } else if coupleId.isEmpty {
                     OnboardingView(coupleId: $coupleId)
