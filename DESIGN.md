@@ -838,29 +838,48 @@ in push/pairing plumbing.
 
 ## 13. Next steps
 
-1. Spike the App Groups + Keychain Sharing + Background Modes-under-free-
-   team question (§10) — quick, and gates the widget architecture in §6,
-   the widget auth design in §5.5, and how much to trust `BGAppRefreshTask`
-   in §5.2 #3.
-2. Update the MacBook Pro past Sonoma 14.6.1 to Sequoia/Tahoe (§4) before
-   installing the latest Xcode — routine, no longer an open question.
-3. Set up the Xcode project with the target structure from §5.6.
-4. ~~Write/test the Security Rules from §5.3 using the local emulator~~ —
-   **done** (§10). Still need to set up the real Firebase project itself
-   per §5.7 (Spark plan, Native-mode Firestore, Anonymous Auth only) —
-   that half needs your Google login and hasn't happened yet.
-5. Build the join-code pairing flow (§5.3) end to end between two test
+**Distribution pivot (supersedes §2's original plan)**: rather than
+installing Xcode locally, the build/verify loop now runs entirely on
+GitHub Actions — `project.yml` (XcodeGen) generates the real `.xcodeproj`
+and CI builds it against a real iOS SDK on every push, free and unlimited
+on this public repo. Real-device installation is planned via SideStore/
+AltStore Classic (self-refreshing, free Apple ID, no companion computer
+needed after setup) rather than local Xcode + physical re-signing — this
+may also resolve §2's "app goes dark during long apart stretches"
+concern, though that's not yet confirmed in practice. Worth writing this
+up properly in §2/§5.6 in a future pass rather than leaving it only here.
+
+1. ~~Set up the Xcode project with the target structure from §5.6~~ —
+   **done via XcodeGen** (`project.yml`), not Xcode's GUI.
+2. ~~Write/test the Security Rules from §5.3 using the local emulator~~ —
+   **done** (§10), and now re-run automatically in CI as a regression
+   check on every push.
+3. ~~Get the Swift code to actually compile~~ — **done**: CI caught two
+   real compiler errors (missing `await` on two `FirestoreService`
+   Firestore calls) on the first real build attempt, both fixed, and the
+   app + widget + `CoupleCountdownKit` (including its unit tests, which
+   couldn't run locally either) now build clean against a real iOS SDK on
+   every push. This is genuinely verified now, not just written.
+4. Set up the real Firebase project per §5.7 (Spark plan, Native-mode
+   Firestore, Anonymous Auth only) — needs your Google login, hasn't
+   happened yet. The placeholder project ID/API key/App Group/Keychain
+   group strings throughout the codebase need real values once it exists.
+5. Spike the App Groups + Keychain Sharing + Background Modes-under-free-
+   team question (§10) — this one still needs a real device and Xcode
+   somewhere (or the SideStore/AltStore path above), since CI's Simulator
+   build doesn't exercise free-team real-device signing at all.
+6. Build the join-code pairing flow (§5.3) end to end between two test
    devices/accounts, including the onboarding name-entry step.
-6. Build the sync mechanisms (§5.2) incrementally: launch fetch first
+7. Build the sync mechanisms (§5.2) incrementally: launch fetch first
    (simplest, highest value), then the foreground listener, then the
    widget's own REST fetch + token refresh (§5.5), then `BGAppRefreshTask`
    last (lowest reliability, least urgent).
-7. Confirm v1 feature scope unchanged from §3: core countdown + status
+9. Confirm v1 feature scope unchanged from §3: core countdown + status
    toggle + history log + thinking-of-you tap + cumulative stats +
    milestone celebration + anniversary counters + partner time zone
    display — now with the shared understanding that none of it is
-   push-instant (§5.4), and that distribution itself has the re-signing
-   limitation accepted in §2.
-8. Design a real AppIcon asset before the first install to a home screen —
-   easy to forget since a default/blank icon doesn't block a build, but
-   looks broken once it's actually sitting on a phone.
+   push-instant (§5.4), and that distribution's exact mechanism is being
+   revisited (see the pivot note above) rather than settled.
+10. Design a real AppIcon asset before the first install to a home
+    screen — easy to forget since a default/blank icon doesn't block a
+    build, but looks broken once it's actually sitting on a phone.
