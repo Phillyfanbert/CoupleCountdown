@@ -31,7 +31,7 @@ final class FirestoreService {
             lastUpdatedBy: uid,
             lastUpdatedAt: Date()
         )
-        try coupleRef(coupleId).setData(from: state)
+        try await coupleRef(coupleId).setData(from: state)
         // codeExpiresAt (§5.3 point 6) is Firestore-lifecycle-only
         // metadata, not modeled in RelationshipState — kept out of the
         // create write so the Security Rules' create check
@@ -124,7 +124,7 @@ final class FirestoreService {
     // MARK: - Important dates (§7.4)
 
     func addImportantDate(_ date: ImportantDate, coupleId: String) async throws {
-        try coupleRef(coupleId).collection("importantDates").document(date.id).setData([
+        try await coupleRef(coupleId).collection("importantDates").document(date.id).setData([
             "label": date.label,
             "date": Timestamp(date: date.date),
             "repeatsAnnually": date.repeatsAnnually,
