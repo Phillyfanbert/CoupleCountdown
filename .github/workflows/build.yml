@@ -50,14 +50,25 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices available | grep "$UDID"
 
-      - name: Build for iOS Simulator (no code signing)
+      - name: Build for iOS Simulator (ad-hoc local signing)
         run: |
+          # Not CODE_SIGNING_ALLOWED=NO (fully unsigned): that build has
+          # zero entitlements at all, which breaks even basic Keychain
+          # access — confirmed via a real run, where Firebase Auth's
+          # internal session-persistence write failed with
+          # "SecItemAdd (-34018) A required entitlement isn't present."
+          # CODE_SIGN_IDENTITY=- is ad-hoc local signing ("Sign to Run
+          # Locally" in Xcode's UI) — Simulator accepts it without any
+          # real Apple Developer account, and it's enough to get a valid
+          # entitlements set embedded.
           xcodebuild build \
             -project CoupleCountdown.xcodeproj \
             -scheme CoupleCountdown \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES
 
       - name: Boot simulator, install, launch, and screenshot the app
         run: |
