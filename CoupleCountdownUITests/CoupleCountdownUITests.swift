@@ -185,6 +185,16 @@ final class CoupleCountdownUITests: XCTestCase {
 
         app.buttons["saveImportantDateButton"].tap()
 
+        // Distinguish "the sheet never dismissed" (the write itself
+        // failed — AddImportantDateView only calls dismiss() after a
+        // successful write) from "the list never reflected the new item"
+        // (a reload/rendering issue), rather than one bare assertion that
+        // can't tell those apart.
+        XCTAssertTrue(
+            waitForNonExistence(of: labelField, timeout: 10),
+            "Add Important Date sheet never dismissed after tapping Save — the addImportantDate() write itself likely failed"
+        )
+
         // .otherElements assumed the wrong resolved type for another
         // .accessibilityElement(children: .combine) view elsewhere in this
         // suite (see testMilestoneCelebrationShowsAndDismissesOnTap) —
