@@ -166,6 +166,78 @@ jobs:
           path: logs/
           if-no-files-found: ignore
 
+  build-device-ipa:
+    name: Build unsigned .ipa for real-device sideloading (SideStore/AltStore)
+    runs-on: macos-latest
+    # Only for pushes to main / manual runs — never for PRs, so an
+    # untrusted/in-progress branch can't publish over the release a real
+    # device might be about to install from.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        run: xcodegen generate
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project CoupleCountdown.xcodeproj \
+            -scheme CoupleCountdown
+
+      - name: Build for a real iOS device (unsigned)
+        run: |
+          # Deliberately unsigned, not ad-hoc: SideStore/AltStore strip
+          # whatever signature is present and re-sign the whole app with
+          # the user's own free Apple ID at install time, so there's
+          # nothing for a CI-applied signature to accomplish here — this
+          # is the standard, well-established shape for an IPA meant to
+          # be sideloaded rather than distributed through the App Store.
+          # (Simulator builds elsewhere in this workflow need ad-hoc
+          # signing for a different reason: the Simulator itself enforces
+          # entitlements for things like Keychain access even without a
+          # real device, which doesn't apply here.)
+          xcodebuild build \
+            -project CoupleCountdown.xcodeproj \
+            -scheme CoupleCountdown \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Payload/CoupleCountdown.app into an .ipa
+        id: package
+        run: |
+          APP_PATH=$(find DerivedData -name "CoupleCountdown.app" -path "*iphoneos*" | head -1)
+          echo "App bundle: $APP_PATH"
+          mkdir -p ipa-build/Payload
+          cp -R "$APP_PATH" ipa-build/Payload/
+          (cd ipa-build && zip -qr ../CoupleCountdown.ipa Payload)
+          echo "size=$(stat -f%z CoupleCountdown.ipa)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate an AltStore/SideStore source manifest
+        env:
+          IPA_SIZE: ${{ steps.package.outputs.size }}
+        run: node .github/scripts/generate-altsource.js
+
+      - name: Publish/update the "latest" GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Rolling release: same tag every time, so the SideStore source
+          # URL and a bookmarked download link never change across builds.
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            CoupleCountdown.ipa source.json \
+            --title "Latest build ($(git rev-parse --short HEAD))" \
+            --notes "Automatically built from the latest push to main. Unsigned — install via SideStore or AltStore, which re-sign it with your own free Apple ID at install time." \
+            --latest
+
   test-kit-package:
     name: Run CoupleCountdownKit unit tests
     runs-on: macos-latest
