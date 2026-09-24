@@ -42,9 +42,11 @@ a link to SideStore's own setup guide if you don't have SideStore yet.
 Both links on that page point at a rolling release that's rebuilt
 automatically on every push to `main`, so they never go stale.
 
-One thing to know either way: each browser or phone signs in as its own
-anonymous identity, and a pairing holds exactly two people — so a third
-device can't join an existing pairing.
+**Accounts:** sign up once with an email and password, then sign in with
+the same account on as many devices as you like — the iPhone app, your
+phone's browser, your computer — and every one shows the same countdown.
+Your partner makes their own account and joins with your code. A pairing is
+always exactly two people, but each of you can use any number of devices.
 
 ## Why this project
 
@@ -63,7 +65,8 @@ below.
   Screen and Lock Screen
 - Two-state relationship status (`apart` ↔ `together`) synced between both
   partners' devices
-- A lightweight join-code pairing flow — no accounts, no phone numbers
+- A lightweight join-code pairing flow on top of simple email + password
+  accounts — one account works on all your devices; no phone numbers
 - Append-only history log of together/apart events, with derived cumulative
   stats (total days together vs. apart)
 - A "thinking of you" one-tap nudge
@@ -107,8 +110,9 @@ app":
 - **UI**: SwiftUI, WidgetKit (Home Screen + Lock Screen widgets) on iPhone;
   a dependency-free static web client (`web/`) hosted on Firebase Hosting's
   free tier
-- **Backend**: Firebase Firestore (free Spark plan) + Firebase Anonymous
-  Authentication
+- **Backend**: Firebase Firestore (free Spark plan) + Firebase
+  Authentication (email + password accounts, shared by the iPhone app and
+  the web client)
 - **Sync**: no push notifications — a layered, honestly-documented
   best-effort sync strategy (realtime listener, launch fetch, background
   refresh, and independent widget refresh)

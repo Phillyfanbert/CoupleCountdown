@@ -306,7 +306,31 @@ headroom even under pessimistic assumptions. Not a concern at 2-user scale;
 worth re-checking only if a bug ever causes a retry loop (§5.6 covers the
 failure mode for that).
 
-### 5.3 Pairing (no CKShare — join-code + Anonymous Auth)
+### 5.3 Pairing (no CKShare — join-code + email/password accounts)
+
+> **Superseded identity model (accounts).** Step 1 below originally used
+> Anonymous Auth, which ties identity to one install — so one person couldn't
+> use the iPhone app and the web client (or two browsers) in the same pairing.
+> Identity is now a Firebase **email + password** account, identical on iOS
+> and web. A pairing is still exactly two people (two uids), but each person
+> can be signed in on any number of devices. The pairing and display name live
+> on the account in `users/{uid}` (`displayName`, `coupleId`; owner-only,
+> key- and type-restricted in the rules), and every signed-in device watches
+> that record, so pairing, joining, or cancelling on one device moves the
+> others. Create and join write `users/{uid}` in the same batch as the couple
+> doc, so a pairing can't exist without its account knowing. Clients act only
+> on server-confirmed account state (`hasPendingWrites` skipped): acting on
+> the local echo after Create opened the new pairing before the server had it,
+> the read was denied, and a denied Firestore listener never recovers.
+> A pre-accounts anonymous identity is upgraded in place with
+> `linkWithCredential` (same uid), and its pairing moves onto the account.
+> Why email/password: Google sign-in on iOS depends on an OAuth client tied to
+> the bundle ID, which SideStore changes when it re-signs; passwordless email
+> links depended on Firebase Dynamic Links (shut down in 2025); Sign in with
+> Apple needs the paid program. Uninstalling the app no longer unpairs anyone.
+> Also new: a creator can cancel a pairing nobody has joined yet (the realistic
+> "both tapped Create" fix) — it's marked `closed`, the join path refuses closed
+> pairings, and the account's `coupleId` is cleared.
 
 1. Both apps call `Auth.auth().signInAnonymously()` on first launch,
    obtaining a stable per-install `uid` (free, part of Spark plan).
@@ -849,9 +873,9 @@ native app rather than replacing it. Known parity gaps, deliberately fixed on
 web first: leaving always asks for a new meetup date (the iPhone app only asks
 when none is stored, so a second goodbye shows the previous trip's expired
 countdown), and a yearly date that falls *today* shows "Today" instead of
-rolling to next year. Identity is per browser/device (anonymous auth), so one
-person can't use both the iPhone app and the web client in the same pairing.
-Milestone celebrations are not in the web v1.
+rolling to next year. Identity is an email + password account shared with the
+iPhone app (see the note at the top of §5.3), so one person can use both at
+once. Milestone celebrations are not in the web v1.
 
 **Distribution pivot (supersedes §2's original plan)**: rather than
 installing Xcode locally, the build/verify loop now runs entirely on
