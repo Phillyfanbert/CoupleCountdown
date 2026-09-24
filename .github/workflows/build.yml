@@ -260,9 +260,16 @@ jobs:
 
       # Pure-function ports of the Swift stats/date logic (web/logic.js) —
       # mirrors CoupleCountdownKitTests so the web client can't drift from
-      # the iPhone app's behavior.
-      - name: node --test
-        run: node --test web/logic.test.js
+      # the iPhone app's behavior. Run in several time zones: the calendar-
+      # day bug (dates a day early for a partner further west) only shows
+      # up across zones, including UTC+13 (New Zealand summer).
+      - name: node --test (several time zones)
+        run: |
+          set -e
+          for tz in UTC America/Los_Angeles America/New_York Asia/Tokyo Pacific/Auckland; do
+            echo "== TZ=$tz"
+            TZ=$tz node --test web/logic.test.js
+          done
 
   test-firestore-rules:
     name: Run Firestore Security Rules tests

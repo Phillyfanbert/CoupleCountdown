@@ -89,9 +89,39 @@ final class CoupleCountdownUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for notNow in [app.buttons["Not Now"], springboard.buttons["Not Now"]] where notNow.exists {
             notNow.tap()
+            // Let it finish animating away — a tap made while it's still
+            // leaving can be swallowed.
+            Thread.sleep(forTimeInterval: 1)
             return true
         }
         return false
+    }
+
+    /// Taps `element` and waits for `next` to appear, tapping again if the
+    /// tap was swallowed. A real run showed that a tap made in the same
+    /// instant a screen is changing (a prompt animating away, a view swapping
+    /// in) is sometimes lost: the button stays put and nothing happens.
+    private func tap(
+        _ element: XCUIElement,
+        until next: XCUIElement,
+        in app: XCUIApplication,
+        attempts: Int = 3,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for _ in 0..<attempts {
+            tapWhenReady(element, in: app, file: file, line: line)
+            let tappedAt = Date()
+            while Date().timeIntervalSince(tappedAt) < 20 {
+                if next.exists { return }
+                // Still there and tappable a few seconds later: the tap was
+                // lost. (A registered tap moves on, covers, or disables it.)
+                if Date().timeIntervalSince(tappedAt) > 3, element.exists, element.isHittable, element.isEnabled { break }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            if next.exists { return }
+        }
+        XCTFail("Tapping \(element) never led to \(next)", file: file, line: line)
     }
 
     /// Taps `element` once it's actually tappable (existing isn't enough —
@@ -150,18 +180,17 @@ final class CoupleCountdownUITests: XCTestCase {
     private func completeOnboardingByCreating(_ app: XCUIApplication, name: String = "Alex") -> (email: String, code: String) {
         let email = signUp(app, name: name)
 
-        tapWhenReady(app.buttons["createPairingButton"], in: app)
-
         let codeText = app.staticTexts["generatedCodeText"]
-        XCTAssertTrue(codeText.waitForExistence(timeout: 15), "Pairing code was never generated — createCouple() Firestore write likely failed")
+        tap(app.buttons["createPairingButton"], until: codeText, in: app)
+        XCTAssertTrue(codeText.exists, "Pairing code was never generated — createCouple() Firestore write likely failed")
         let code = codeText.label
         XCTAssertEqual(code.count, 6, "Join code should be 6 characters, got \"\(code)\"")
 
-        tapWhenReady(app.buttons["continueToCountdownButton"], in: app)
+        tap(app.buttons["continueToCountdownButton"], until: app.buttons["toggleStatusButton"], in: app)
         return (email, code)
     }
 
-    /// CountdownView's toolbar puts importantDatesNavLink/settingsNavLink
+    /// CountdownView's toolbar puts calendarNavLink/settingsNavLink
     /// at .secondaryAction placement — on the iPhone widths CI runs
     /// against, iOS collapses those into a "More" overflow button
     /// (identifier "OverflowBarButtonItem") rather than showing them
@@ -203,10 +232,8 @@ final class CoupleCountdownUITests: XCTestCase {
         // or share the code (see CreatePairingView.createPairing()).
         let app = launchFreshApp()
         signUp(app)
-        tapWhenReady(app.buttons["createPairingButton"], in: app)
-
         let codeText = app.staticTexts["generatedCodeText"]
-        XCTAssertTrue(codeText.waitForExistence(timeout: 15))
+        tap(app.buttons["createPairingButton"], until: codeText, in: app)
 
         // Give the app every opportunity to have wrongly auto-advanced;
         // the code screen (and its Continue button) should still be here.
@@ -219,10 +246,8 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         signUp(app, name: "Sam")
 
-        tapWhenReady(app.buttons["joinPairingButton"], in: app)
-
         let codeField = app.textFields["joinCodeTextField"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 10))
+        tap(app.buttons["joinPairingButton"], until: codeField, in: app)
         codeField.tap()
         codeField.typeText("ZZZZZZ")
         app.buttons["joinButton"].tap()
@@ -268,9 +293,8 @@ final class CoupleCountdownUITests: XCTestCase {
         tapWhenReady(app.buttons["cancelPairingButton"], in: app)
         let confirm = app.buttons["Cancel pairing"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Cancelling should ask for confirmation")
-        confirm.tap()
-
-        XCTAssertTrue(app.buttons["createPairingButton"].waitForExistence(timeout: 20), "Cancelling should return the account to onboarding")
+        tap(confirm, until: app.buttons["createPairingButton"], in: app)
+        XCTAssertTrue(app.buttons["createPairingButton"].exists, "Cancelling should return the account to onboarding")
     }
 
     // MARK: - Countdown / status toggle / date sheet
@@ -300,11 +324,52 @@ final class CoupleCountdownUITests: XCTestCase {
         toggleButton.tap()
 
         let saveDateButton = app.buttons["saveDateButton"]
-        XCTAssertTrue(saveDateButton.waitForExistence(timeout: 10), "Leaving again with no date queued should open the date-prompt sheet")
-        saveDateButton.tap() // accept the sheet's default (now + 7 days)
-
+        XCTAssertTrue(saveDateButton.waitForExistence(timeout: 10), "Leaving again with nothing planned should ask when you'll see each other next")
+        // Accept the sheet's default (a week from today, 6 PM).
         let countdownText = app.staticTexts["countdownText"]
-        XCTAssertTrue(countdownText.waitForExistence(timeout: 15), "Saving a meetup date should dismiss the sheet and show a live countdown")
+        tap(saveDateButton, until: countdownText, in: app)
+        XCTAssertTrue(countdownText.exists, "Saving a visit should dismiss the sheet and show a live countdown")
+        XCTAssertTrue(app.staticTexts["meetupTargetText"].exists, "The countdown should say what it's counting down to")
+    }
+
+    func testLeavingAgainCountsDownToThePlannedVisit() {
+        // Regression: after the first trip, "Leaving again" reused the old,
+        // already-passed date and never asked for the next one. It now
+        // counts down to the next planned visit, and only asks when nothing
+        // is planned.
+        let app = launchFreshApp()
+        completeOnboardingByCreating(app)
+
+        tap(app.buttons["planVisitButton"], until: app.buttons["saveDateButton"], in: app)
+        let countdownText = app.staticTexts["countdownText"]
+        tap(app.buttons["saveDateButton"], until: countdownText, in: app)
+        let target = app.staticTexts["meetupTargetText"]
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        let plannedLabel = target.label
+
+        let toggle = app.buttons["toggleStatusButton"]
+        tap(toggle, until: app.staticTexts["togetherText"], in: app) // together
+        XCTAssertFalse(countdownText.exists, "Together should replace the countdown, not keep ticking")
+
+        tapWhenReady(toggle, in: app) // leaving again
+        XCTAssertTrue(countdownText.waitForExistence(timeout: 15), "Leaving again should count down to the planned visit")
+        XCTAssertFalse(app.buttons["saveDateButton"].exists, "With a visit already planned, leaving shouldn't ask again")
+        XCTAssertEqual(target.label, plannedLabel)
+    }
+
+    func testPlanVisitFromCalendarShowsInComingUpAndCountdown() {
+        let app = launchFreshApp()
+        completeOnboardingByCreating(app)
+
+        tapToolbarItem(app, identifier: "calendarNavLink", label: "Calendar")
+        tap(app.buttons["planVisitFromCalendarButton"], until: app.buttons["saveDateButton"], in: app)
+        let visitRow = app.descendants(matching: .any)["visitRow"].firstMatch
+        tap(app.buttons["saveDateButton"], until: visitRow, in: app)
+        XCTAssertTrue(visitRow.exists, "A planned visit should appear under Coming up")
+
+        // The main countdown follows the plan.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["countdownText"].waitForExistence(timeout: 15), "The countdown should follow the newly planned visit")
     }
 
     // MARK: - Important Dates ("calendar" feature)
@@ -313,14 +378,10 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        tapToolbarItem(app, identifier: "importantDatesNavLink", label: "Important Dates")
-
-        let addButton = app.buttons["addImportantDateButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 10))
-        addButton.tap()
+        tapToolbarItem(app, identifier: "calendarNavLink", label: "Calendar")
 
         let labelField = app.textFields["dateLabelTextField"]
-        XCTAssertTrue(labelField.waitForExistence(timeout: 10))
+        tap(app.buttons["addImportantDateButton"], until: labelField, in: app)
         labelField.tap()
         labelField.typeText("Anniversary")
 
