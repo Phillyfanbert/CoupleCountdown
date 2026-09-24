@@ -15,6 +15,7 @@ const {
   getDoc,
   setDoc,
   updateDoc,
+  writeBatch,
 } = require('firebase/firestore');
 
 const PROJECT_ID = 'demo-couplecountdown';
@@ -110,6 +111,17 @@ describe('couples/{coupleId} — join while open', () => {
     );
   });
 
+  it("lets a joiner record the pairing on their account in the same batch as the join", async () => {
+    // What both clients do, so a failed follow-up write can't leave the
+    // joiner in the pairing with an account that doesn't know it.
+    await seedCouple([UID_A]);
+    const db = testEnv.authenticatedContext(UID_B).firestore();
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'couples', COUPLE_ID), { participantUIDs: [UID_A, UID_B] });
+    batch.set(doc(db, 'users', UID_B), { displayName: 'Sam', coupleId: COUPLE_ID }, { merge: true });
+    await assertSucceeds(batch.commit());
+  });
+
   it('rejects a join write that also touches another field', async () => {
     await seedCouple([UID_A]);
     await assertFails(
@@ -130,6 +142,11 @@ describe('couples/{coupleId} — cancelled pairing', () => {
   it('lets the creator mark their still-open pairing closed', async () => {
     await seedCouple([UID_A]);
     await assertSucceeds(updateDoc(coupleDoc(UID_A), { closed: true }));
+  });
+
+  it('rejects cancelling once the partner has joined (cancel/join race)', async () => {
+    await seedCouple([UID_A, UID_B]);
+    await assertFails(updateDoc(coupleDoc(UID_A), { closed: true }));
   });
 
   it('rejects joining a pairing its creator cancelled', async () => {

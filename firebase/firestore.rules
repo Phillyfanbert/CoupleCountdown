@@ -36,7 +36,13 @@ service cloud.firestore {
         // the join path below.
         (request.auth.uid in resource.data.participantUIDs &&
          !request.resource.data.diff(resource.data).affectedKeys()
-           .hasAny(['participantUIDs']))
+           .hasAny(['participantUIDs']) &&
+         // Cancelling (setting `closed`) is only for a pairing nobody has
+         // joined yet. Otherwise a creator confirming "cancel" just as
+         // their partner joined would walk away and strand the partner.
+         (!request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['closed']) ||
+          resource.data.participantUIDs.size() < 2))
         ||
         // Joining: append self only, only while a slot is open, only
         // that one field changes, and never into a pairing its creator
