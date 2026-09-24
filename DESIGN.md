@@ -1,14 +1,86 @@
 # CoupleCountdown — Design Document
 
-Status: **Draft v0.3** — planning, not yet implemented.
+Status: **v1 built.** The iPhone app and widget, the web client, and the
+Firebase backend are implemented and tested in CI. This document began as
+the pre-build plan (v0.3). §0 summarizes what was actually built, and
+"As built" notes mark where the plan below was changed or superseded.
+
+## 0. As built (current state)
+
+- **Clients:**
+  - A SwiftUI iPhone app with Home Screen and Lock Screen widgets (iOS 17+).
+  - A static web client (`web/`) on Firebase Hosting, at
+    <https://couplecountdown-7715c.web.app>, for computers and any other
+    phone.
+
+  Both read and write the same Firestore data.
+- **Identity:** Firebase email + password accounts, shared by both clients
+  (§5.3 note). One person can be signed in on any number of devices, and a
+  pairing is two accounts. This replaced the planned Anonymous Auth.
+- **Data model changes since the plan:**
+  - `users/{uid}` holds each account's name and current pairing.
+  - `couples/{id}/visits` holds planned meetups with a time (§7.5).
+  - The couple doc gains `closed` (cancelled before anyone joined) and
+    `codeExpiresAt`.
+  - Pings gain `expiresAt`.
+
+  §5.1 is updated.
+- **Built:**
+  - The countdown to the next visit, which follows a calendar of planned
+    visits (§7.5).
+  - The apart/together toggle with a batched history log (§8), and total
+    days together and apart (§7.2).
+  - Important dates on a month-grid calendar with "in N days" countdowns
+    (§7.4, §7.5).
+  - Each partner's local time (§9.1).
+  - Themes (§9).
+  - Milestone celebrations (§7.3, iPhone only).
+  - "Thinking of you", send side only (see below).
+- **Sync:** as planned in §5.2:
+  - the realtime listener;
+  - the launch fetch;
+  - pull-to-refresh;
+  - the widget's own REST fetch with Keychain-shared token refresh;
+  - `BGAppRefreshTask` with a firing log.
+- **Distribution:** no local Xcode. GitHub Actions generates the project
+  with XcodeGen, builds and tests on every push, and publishes an unsigned
+  `.ipa` plus a SideStore source (`source.json`) to a rolling `latest`
+  release. SideStore installs the app and signs it with the user's free
+  Apple ID (§13).
+- **Tests in CI:**
+  - 14 XCUITests against the live backend;
+  - 19 `CoupleCountdownKit` unit tests;
+  - 29 Security Rules tests on the emulator;
+  - 18 web logic tests, run in five time zones.
+
+**Known gaps (not built, or not verified yet):**
+
+- **"Thinking of you"** nudges are written to `pings`, but neither client
+  reads or shows received ones yet, so the partner never sees them (§7.1).
+- **Join codes don't actually expire.** Both clients write `codeExpiresAt`,
+  but no Firestore TTL policy is configured on the project and the rules
+  don't check the field (§5.3 step 6). Pings have no TTL policy either. A
+  code does stop working once the partner joins, or once it's cancelled.
+- **Not confirmed on a physical iPhone:** App Groups and Keychain Sharing
+  under SideStore's free Apple ID signing (§10). CI exercises only the
+  Simulator and an unsigned device build.
+- **The `BGAppRefreshTask` firing log** is recorded, but nothing in the app
+  shows it yet, so §10's keep-or-drop threshold hasn't been evaluated.
+- **Themes are per device**, not per couple as §9 planned: App Group
+  storage on iPhone (shared with the widget) and browser storage on web.
+- **The web client** has no widget, which a website can't provide, and no
+  milestone celebration. Neither client has push notifications (§2).
+- **Leaving a pairing** isn't possible once the partner has joined. The only
+  options are cancelling before then, and signing out.
 
 ## 1. Concept
 
-A two-person iOS app for couples (e.g. long-distance relationships) that shows
+A two-person app for couples (e.g. long-distance relationships) that shows
 a shared, synced countdown to their next time together. Both partners see the
-identical countdown on their phones, in Home Screen / Lock Screen widgets and
-optionally a Live Activity, and can update the shared state ("we're together
-now" / "leaving again") from either device.
+identical countdown on their phones, in Home Screen / Lock Screen widgets,
+and on the web (§13), and can update the shared state ("we're together
+now" / "leaving again") from any of their devices. (A Live Activity was in
+the original concept; it was dropped, see §3.)
 
 Comparable existing apps: *Timestamp*, *Tondr*, *Lasting*.
 
@@ -34,7 +106,8 @@ decision reshapes the architecture in §5.
 
 Concretely, under the $0 rule as it now stands:
 
-- **Backend**: Firebase (Firestore + Anonymous Authentication), **Spark
+- **Backend**: Firebase (Firestore + Authentication; planned as Anonymous
+  Auth, built with email + password accounts, see §5.3), **Spark
   (free) plan** — confirmed to require no credit card or billing account for
   Firestore and standard Authentication usage within free quotas (1 GiB
   storage, 50,000 reads/day, 20,000 writes/day — enormous headroom for two
@@ -49,7 +122,10 @@ Concretely, under the $0 rule as it now stands:
   phone will know right away."
 - **Fonts/assets**: system fonts (e.g. SF Rounded) or open-license fonts
   only (e.g. Google Fonts / SIL Open Font License) — no paid type licenses.
-- **Distribution**: no Apple Developer Program enrollment. Distribution path
+- **Distribution**: no Apple Developer Program enrollment. *(As built, this
+  plan was superseded: CI builds the app and SideStore installs and
+  refreshes it on the phone itself, with no Mac involved. See §0 and §13.
+  The original plan follows.)* Distribution path
   is installing directly to both partners' own devices via Xcode with a free
   Apple ID (free provisioning profiles), which requires re-installing/
   re-signing roughly every 7 days — and re-signing isn't remote-triggerable;
@@ -73,7 +149,8 @@ Concretely, under the $0 rule as it now stands:
   needs an early spike (create a trivial two-target project, free-team
   signed, and confirm App Groups provisions cleanly) before the widget
   architecture in §6 is finalized. A fallback that avoids App Groups
-  entirely is noted there in case it doesn't work.
+  entirely is noted there in case it doesn't work. *(As built: still
+  unconfirmed on a physical iPhone. See §0.)*
 - **No paid third-party SDKs, analytics, crash reporting, or CI services.**
 
 ## 3. Goals / Non-Goals
@@ -102,7 +179,8 @@ Concretely, under the $0 rule as it now stands:
   shown alongside the countdown (see §9.1).
 
 **Explicit non-goals for v1** (candidates for later)
-- Auto-advancing scheduled calendar of future meetups (Option B, §7).
+- ~~Auto-advancing scheduled calendar of future meetups (Option B, §7).~~
+  Built after all, as planned visits (§7.5).
 - Live Activity / Dynamic Island presence (also blocked by the no-push
   constraint for any *remote* updates to an already-started activity).
 - Photo/note attachments on log entries.
@@ -140,7 +218,8 @@ to run on two specific, known phones rather than the general public, there's
 no reason to target anything older than current. **Policy: minimum
 deployment target = whatever the latest publicly released iOS is at the
 time of building**, re-checked at build time rather than pinned to a number
-now.
+now. *(As built: `project.yml` sets iOS 17.0, which covers everything the
+app and widget use.)*
 
 **Also previously unstated: iPhone only.** No iPad support/testing — this
 app only ever runs on the two specific iPhones in question. If Xcode's
@@ -171,15 +250,22 @@ step in §13.
                           ▼        ▼
                  ┌─────────────────────────┐
                  │  Firebase (Spark/free)   │
-                 │  Firestore + Anonymous   │
-                 │  Auth, no Cloud Functions│
+                 │  Firestore + Auth (email │
+                 │  + password), no Cloud   │
+                 │  Functions               │
                  │                          │
                  │  couples/{coupleId}:     │
                  │   status, nextMeetupDate,│
                  │   participantUIDs,       │
                  │   lastUpdatedBy/At       │
+                 │  users/{uid}:            │
+                 │   displayName, coupleId  │
                  └─────────────────────────┘
 ```
+
+*(As built: the web client (§13) is a third kind of device in this
+picture. It uses the Firestore JS SDK for reads and writes and the realtime
+listener, the same as the app, and it has no widget.)*
 
 No push in this diagram — deliberately. Both phones talk to the same
 Firestore document, but nothing tells either phone *when* the other one
@@ -203,16 +289,33 @@ on that value (and on `status`) is no longer instant by default.
 
 ### 5.1 Data model (v1) — Firestore
 
+*(As built. This block is updated to the implemented schema. `users`,
+`visits`, `closed`, and the ping `expiresAt` were added after the original
+plan.)*
+
 ```
 couples/{coupleId}                      // coupleId is the human-shareable join code
   - status: "apart" | "together"
-  - nextMeetupDate: Timestamp?          // stored in UTC
-  - participantUIDs: [String]           // Firebase Anonymous Auth UIDs, max 2
+  - nextMeetupDate: Timestamp?          // an instant; follows the earliest
+                                        // upcoming visit (§7.5)
+  - participantUIDs: [String]           // Firebase Auth UIDs (one per account), max 2
   - partnerProfiles: {                  // map keyed by uid
       [uid]: { displayName, timeZoneIdentifier }
     }
   - lastUpdatedBy: uid
   - lastUpdatedAt: Timestamp            // FieldValue.serverTimestamp()
+  - codeExpiresAt: Timestamp?           // set at create, removed on join (§5.3
+                                        // step 6); not yet enforced, see §0
+  - closed: Bool?                       // cancelled before anyone joined (§7.5)
+
+users/{uid}                             // one per account; owner-only (§5.3 note)
+  - displayName: String
+  - coupleId: String?                   // the account's current pairing
+
+couples/{coupleId}/visits/{visitId}     // planned meetups, see §7.5
+  - start: Timestamp                    // date *and* time, trimmed to the minute
+  - note: String?
+  - createdBy: uid
 
 couples/{coupleId}/events/{eventId}     // append-only, see §7 Option A
   - type: "became_together" | "became_apart"
@@ -225,15 +328,18 @@ couples/{coupleId}/events/{eventId}     // append-only, see §7 Option A
 
 couples/{coupleId}/importantDates/{id}  // see §7.4
   - label: String
-  - date: Timestamp                     // UTC
+  - date: Timestamp                     // a calendar day: 12:00 UTC on that
+                                        // day, read with UTC components (§7.5)
   - repeatsAnnually: Bool
   - createdBy: uid
 
 couples/{coupleId}/pings/{pingId}       // "thinking of you", see §7.1
   - sentBy: uid
   - sentAt: Timestamp
-  // TTL policy auto-deletes these after a few days, no Cloud Function
-  // needed. (Verified: TTL is a Standard-edition Firestore feature, not
+  - expiresAt: Timestamp                // sentAt + 5 days, for the TTL policy
+  // Planned: a TTL policy on expiresAt auto-deletes these after a few days,
+  // no Cloud Function needed. As built, the policy isn't configured yet
+  // (§0). (Verified: TTL is a Standard-edition Firestore feature, not
   // gated to Enterprise edition — a first search pass misread Firebase's
   // doc-site URL structure and suggested otherwise; a second pass found
   // Google's own docs explicitly describing TTL field behavior "for
@@ -436,6 +542,10 @@ failure mode for that).
    failing against the first version of this file — pure inspection (mine
    and this document's, across two prior drafts) had missed it entirely.
    The fixed version above is what's actually in `firebase/firestore.rules`.
+   *(As built: the snippet above is the original v1. The live file adds
+   owner-only `users/{uid}` records and refuses joining a `closed` pairing.
+   It also allows `closed` to be set only while nobody has joined. The suite
+   is now 29 tests, run in CI on every push.)*
 6. **Guessing-window mitigation**: at creation, set `codeExpiresAt: now +
    48h` on the couple doc and register it with a Firestore TTL policy
    (free on Spark, no Cloud Function — verified in §5.1). When the second
@@ -443,11 +553,18 @@ failure mode for that).
    clear `codeExpiresAt` to `null` as part of that same write, so paired
    couples are never auto-deleted — only codes that sat unpaired for 2 days
    get cleaned up, which is what bounds how long a ~1-billion-combination
-   code stays guessable at all.
+   code stays guessable at all. **As built: not in effect yet.** Both
+   clients write and clear `codeExpiresAt` as described, but no TTL policy
+   has been configured on the Firebase project, and the rules don't compare
+   `request.time` with the field. An unjoined code therefore stays joinable
+   until someone joins or it's cancelled. Closing this needs a TTL policy on
+   `couples.codeExpiresAt`, a rules check on the join path, or both.
 7. Both devices persist `coupleId` locally (UserDefaults is fine — it's not
    secret on its own once paired) and from then on read/write the same
    document and subcollections via the standard Firestore SDK (app) or REST
-   (widget, §5.2).
+   (widget, §5.2). *(As built: the source of truth is the account's
+   `users/{uid}.coupleId`, which every signed-in device watches. The App
+   Group copy exists so the widget knows which couple to fetch.)*
 
 **Unpairing / reset — explicitly out of scope for v1.** There is no "leave"
 or "delete" flow (the rules set `allow delete: if false`, §5.3 point 5
@@ -455,7 +572,10 @@ above). The only way to start over today is reinstalling the app, which
 loses the old Anonymous Auth identity anyway (point 1) — the old couple doc
 is simply abandoned, unused, and harmless at this data scale. Fine as a
 known v1 limitation; not worth building a real reset flow until it's
-actually needed.
+actually needed. *(As built: with accounts, reinstalling no longer unpairs
+anyone. A creator can cancel a pairing nobody has joined yet, and any device
+can sign out. There's still no way to leave a pairing once both partners are
+in it, and deletes are still denied.)*
 
 ### 5.4 Sync latency expectations — read this before designing UI copy
 
@@ -491,7 +611,10 @@ token to Google's token endpoint
 `grant_type=refresh_token` — plain REST, no SDK), then attaches it as
 `Authorization: Bearer <idToken>` on the Firestore REST GET. All of this is
 plain `URLSession`, nothing bundled beyond what a widget extension can
-afford.
+afford. *(As built: the same mechanism, but the token is now the signed-in
+email/password account's refresh token rather than an anonymous one.
+Signing out deletes it from the shared Keychain and clears the widget's
+cache.)*
 
 **This depends on Keychain Sharing working under a free Personal Team** —
 a separate capability from App Groups, and one that hasn't been checked
@@ -567,6 +690,11 @@ made:
   necessarily the default suggestion.
 - **Authentication**: enable the Anonymous provider only — no email/
   password, no SMS (SMS verification requires the paid Blaze plan per §2).
+  *(As built: email/password is the sign-in method (§5.3 note). Anonymous
+  stays enabled only so a pre-accounts install can be upgraded in place.
+  Both are declared in the root `firebase.json`. The project is
+  `couplecountdown-7715c`, and it also serves the web client from Firebase
+  Hosting.)*
 - **App Check**: not enabled in v1 (§10) — can be added later without a
   data-model change.
 
@@ -620,14 +748,19 @@ made:
   immediate re-request and risk hammering the refresh budget). The 30-minute
   ask is a request, not a guarantee — WidgetKit's actual cadence is still
   OS-controlled per §5.2 #4, this just states the intent explicitly instead
-  of leaving it to whatever the default would have been.
+  of leaving it to whatever the default would have been. *(As built: a
+  second entry at the meetup moment itself makes the widget switch to "The
+  day is here" on time, rather than at its next refresh. The widget's states
+  are together, counting down, the day is here, plan your next visit, and
+  not paired yet.)*
 
 ## 7. Calendar / logging — options
 
 - **Option A — history log (v1 choice)**: every together/apart toggle is
   timestamped and stored as an event; rendered as a simple log or calendar
   view. Pure append-only CRUD, no effect on countdown logic.
-- **Option B — forward planning calendar** (deferred): couple pre-schedules
+- **Option B — forward planning calendar** (deferred; *built after all as
+  planned visits, §7.5*): couple pre-schedules
   future meetup date ranges; countdown auto-advances to the next scheduled
   date after a "leaving again" tap instead of requiring manual re-entry.
   Needs a proper `[MeetupEvent]` model with start/end dates.
@@ -650,6 +783,13 @@ would be with push. Worth being explicit about this in the app's own copy
 auto-expire after a few days — free on the Spark plan, no cleanup job
 needed. They're intentionally not written into the permanent
 `RelationshipEvent`/`events` history (§7) — a nudge isn't a milestone.
+
+**As built: only half done.** Both clients send a ping, as a `pings`
+document with `expiresAt`, but neither one reads the collection or shows a
+received ping. The partner therefore never sees it yet, and the TTL policy
+isn't configured either (§0). Finishing it means showing recent pings from
+the other partner on the countdown screen in both clients, and optionally
+in the widget.
 
 ### 7.2 Cumulative stats
 
@@ -692,6 +832,10 @@ mini version of the core countdown:
   `nextMeetupDate` — these are informational countdowns, not tied to the
   apart/together state machine (§8), so they don't interact with that logic
   at all.
+
+*(As built: they appear in the Calendar (§7.5), on the month grid and in
+the "Coming up" list with "Today" / "in N days". There's no separate widget
+for them.)*
 
 ### 7.5 Planned visits and the Calendar (added after v1 review)
 
@@ -762,7 +906,9 @@ happened. Cheap to get right up front, easy to overlook.
 - Soft gradients; `contentTransition(.numericText())` (iOS 16+) for animated
   digit rolling on tick.
 - Per-couple theme (color/gradient enum), selectable by either partner,
-  shared via the same backend record.
+  shared via the same backend record. *(As built: per device, not per
+  couple. The iPhone stores the choice in the App Group, so the widget
+  matches the app, and the web stores it in the browser.)*
 - SwiftUI is sufficient for all of this — no custom rendering engine needed.
   This is craft/time cost, not architectural risk.
 - **Dark mode (previously unstated)**: system fonts/colors handle
@@ -835,7 +981,8 @@ keeps this accurate in practice almost all the time.
   routine software update (Sonoma 14.6.1 → Sequoia/Tahoe) before installing
   the latest Xcode.
 - **Firestore Security Rules** (§5.3): written, run against the local
-  emulator, 18/18 tests passing (`firebase/test/rules.test.js`) — this
+  emulator, 18/18 tests passing at the time, now 29 and run in CI on every
+  push (`firebase/test/rules.test.js`) — this
   needed no Apple hardware at all, so it was done ahead of the
   device-bound items above rather than waiting on them. Found and fixed a
   real bug in the process (the `{sub=**}` recursive-wildcard issue
@@ -856,12 +1003,13 @@ them:**
 - **QR/deep-link pairing**: best-effort convenience only; manually
   typing/reading the code is the primary, required path (§5.3). No
   Universal Links in v1 (would need external hosting for the AASA file).
-- **Anonymous Auth identity loss on reinstall** (§5.3): accepted as a known
-  v1 limitation — no "recovery code" mechanism built for it. Cheap to add
-  later if it becomes a real pain point, not worth the complexity now.
-- **Unpairing/reset**: out of scope for v1 (§5.3) — reinstalling is the
-  only reset path, and it already loses the Anonymous Auth identity per the
-  point above, so there's no separate mechanism needed.
+- ~~**Anonymous Auth identity loss on reinstall** (§5.3): accepted as a known
+  v1 limitation.~~ **Resolved** by email + password accounts (§5.3 note):
+  signing in again on a reinstalled app, or any other device, finds the
+  same pairing.
+- **Unpairing/reset** (§5.3): a creator can cancel a pairing nobody has
+  joined yet, and any device can sign out. Leaving a pairing both partners
+  are in is still out of scope.
 - **Firebase App Check** (free, DeviceCheck/App Attest-based): not in v1
   (§5.7) — the 48-hour code TTL (§5.3) is judged sufficient hardening for a
   2-person app for now. App Check would shut down automated code-guessing
@@ -896,65 +1044,76 @@ one to two weeks solo, similar to the v0.1 estimate, with the risk
 concentrated in the security-rules and widget-REST-fetch pieces rather than
 in push/pairing plumbing.
 
-## 13. Next steps
+## 13. Build status and next steps
 
-**Web client (added later)**: `web/` is a plain static site (ES modules, no
-build step) on Firebase Hosting's free tier, sharing the iPhone app's
-Firestore data model, Security Rules, and join codes field-for-field
-(`web/data.js` mirrors `FirestoreService.swift`; `web/logic.js` ports the
-stats/date logic and is unit-tested in CI against the same cases as the Swift
-tests). It exists because a website is the only $0 way to reach desktops and
-Android — and because it can't provide WidgetKit widgets, it complements the
-native app rather than replacing it. Known parity gaps, deliberately fixed on
-web first: leaving always asks for a new meetup date (the iPhone app only asks
-when none is stored, so a second goodbye shows the previous trip's expired
-countdown), and a yearly date that falls *today* shows "Today" instead of
-rolling to next year. Identity is an email + password account shared with the
-iPhone app (see the note at the top of §5.3), so one person can use both at
-once. Milestone celebrations are not in the web v1.
+**Web client (added after the original plan):** `web/` is a plain static
+site on Firebase Hosting's free tier, made of ES modules with no build
+step. It shares the iPhone app's Firestore data model, Security Rules, and
+join codes field for field:
 
-**Distribution pivot (supersedes §2's original plan)**: rather than
-installing Xcode locally, the build/verify loop now runs entirely on
-GitHub Actions — `project.yml` (XcodeGen) generates the real `.xcodeproj`
-and CI builds it against a real iOS SDK on every push, free and unlimited
-on this public repo. Real-device installation is planned via SideStore/
-AltStore Classic (self-refreshing, free Apple ID, no companion computer
-needed after setup) rather than local Xcode + physical re-signing — this
-may also resolve §2's "app goes dark during long apart stretches"
-concern, though that's not yet confirmed in practice. Worth writing this
-up properly in §2/§5.6 in a future pass rather than leaving it only here.
+- `web/data.js` mirrors `FirestoreService.swift`.
+- `web/logic.js` ports the Kit's stats, date, and visit-planning logic. It
+  is unit-tested in CI against the same cases as the Swift tests, in five
+  time zones.
 
-1. ~~Set up the Xcode project with the target structure from §5.6~~ —
-   **done via XcodeGen** (`project.yml`), not Xcode's GUI.
-2. ~~Write/test the Security Rules from §5.3 using the local emulator~~ —
-   **done** (§10), and now re-run automatically in CI as a regression
-   check on every push.
-3. ~~Get the Swift code to actually compile~~ — **done**: CI caught two
-   real compiler errors (missing `await` on two `FirestoreService`
-   Firestore calls) on the first real build attempt, both fixed, and the
-   app + widget + `CoupleCountdownKit` (including its unit tests, which
-   couldn't run locally either) now build clean against a real iOS SDK on
-   every push. This is genuinely verified now, not just written.
-4. Set up the real Firebase project per §5.7 (Spark plan, Native-mode
-   Firestore, Anonymous Auth only) — needs your Google login, hasn't
-   happened yet. The placeholder project ID/API key/App Group/Keychain
-   group strings throughout the codebase need real values once it exists.
-5. Spike the App Groups + Keychain Sharing + Background Modes-under-free-
-   team question (§10) — this one still needs a real device and Xcode
-   somewhere (or the SideStore/AltStore path above), since CI's Simulator
-   build doesn't exercise free-team real-device signing at all.
-6. Build the join-code pairing flow (§5.3) end to end between two test
-   devices/accounts, including the onboarding name-entry step.
-7. Build the sync mechanisms (§5.2) incrementally: launch fetch first
-   (simplest, highest value), then the foreground listener, then the
-   widget's own REST fetch + token refresh (§5.5), then `BGAppRefreshTask`
-   last (lowest reliability, least urgent).
-9. Confirm v1 feature scope unchanged from §3: core countdown + status
-   toggle + history log + thinking-of-you tap + cumulative stats +
-   milestone celebration + anniversary counters + partner time zone
-   display — now with the shared understanding that none of it is
-   push-instant (§5.4), and that distribution's exact mechanism is being
-   revisited (see the pivot note above) rather than settled.
-10. Design a real AppIcon asset before the first install to a home
-    screen — easy to forget since a default/blank icon doesn't block a
-    build, but looks broken once it's actually sitting on a phone.
+It exists because a website is the only $0 way to reach desktops and
+Android phones. It can't provide WidgetKit widgets, so it complements the
+native app rather than replacing it. On a wide screen it shows a
+two-column layout. Identity is an email + password account shared with the
+iPhone app (§5.3 note), so one person can use both at once. Two
+behaviours were once fixed only on web: leaving counting down to the next
+planned visit, and a yearly date that falls today reading "Today". Both
+now live in the shared Swift logic as well (§7.5). Milestone celebrations
+are iPhone-only.
+
+**Distribution (supersedes §2's original plan):** the build and verify
+loop runs entirely on GitHub Actions, with no local Xcode. `project.yml`
+(XcodeGen) generates the `.xcodeproj`. Every push to `main` then runs these
+jobs:
+
+- builds for the Simulator and runs the XCUITest suite;
+- builds an unsigned real-device `.ipa`;
+- runs the Kit, web-logic, and Security Rules tests;
+- publishes the `.ipa` and a SideStore/AltStore source (`source.json`) to a
+  rolling `latest` GitHub Release.
+
+SideStore installs from that source, re-signs the app with the user's free
+Apple ID, and refreshes the 7-day signature on the phone itself. That
+should retire §2's "app goes dark during long apart stretches" concern, but
+it hasn't been confirmed on a physical iPhone yet.
+
+**Done:**
+
+1. Project and target structure (§5.6), via XcodeGen rather than Xcode's
+   GUI.
+2. Security Rules (§5.3), with emulator tests (29, in CI).
+3. Compiles against a real iOS SDK in CI, app and widget and
+   `CoupleCountdownKit` with its unit tests. CI's first build caught real
+   compiler errors that couldn't have been found locally.
+4. The real Firebase project (§5.7), `couplecountdown-7715c`: Firestore,
+   Authentication, and Hosting, all on the Spark plan.
+5. The join-code pairing flow (§5.3) end to end, including naming, cancel,
+   and accounts across devices. It's covered by the XCUITests against the
+   live backend.
+6. The sync mechanisms (§5.2): the launch fetch, the foreground listener,
+   the widget's REST fetch with token refresh (§5.5), `BGAppRefreshTask`
+   with its firing log, and pull-to-refresh.
+7. The v1 feature scope from §3, plus planned visits and the Calendar
+   (§7.5). The exceptions are listed under known gaps in §0.
+8. A real app icon.
+9. The web client (above).
+
+**Next:**
+
+1. Install on a physical iPhone through SideStore. Confirm that App Groups
+   and Keychain Sharing (the widget's data path, §5.5) work under free
+   Apple ID signing, as the §10 spike intended.
+2. Show received "thinking of you" pings to the partner, in both clients
+   (§7.1).
+3. Make join codes actually expire (§5.3 step 6). Add a TTL policy on
+   `couples.codeExpiresAt` and a rules check on the join path, plus a TTL
+   policy on `pings.expiresAt`.
+4. Surface the `BGAppRefreshTask` firing log, for example in Settings, so
+   §10's keep-or-drop threshold can be evaluated with real data.
+5. Optional: milestone celebrations on web, leaving a pairing after both
+   partners have joined, and a per-couple (shared) theme.
