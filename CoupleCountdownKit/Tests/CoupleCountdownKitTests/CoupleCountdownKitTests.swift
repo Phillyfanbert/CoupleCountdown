@@ -3,39 +3,123 @@
 import XCTest
 @testable import CoupleCountdownKit
 
-final class ImportantDateTests: XCTestCase {
-    func testNextOccurrenceReturnsSameYearWhenUpcoming() {
-        let calendar = Calendar(identifier: .gregorian)
-        let now = calendar.date(from: DateComponents(year: 2026, month: 3, day: 1))!
-        let anniversary = calendar.date(from: DateComponents(year: 2020, month: 8, day: 19))!
-        let date = ImportantDate(id: "1", label: "Anniversary", date: anniversary, repeatsAnnually: true, createdBy: "uidA")
+/// A gregorian calendar pinned to one time zone, so these tests mean the same
+/// thing on any machine.
+private func calendar(_ identifier: String) -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: identifier)!
+    return calendar
+}
 
-        let next = date.nextOccurrence(now: now, calendar: calendar)
-        let components = calendar.dateComponents([.year, .month, .day], from: next)
-        XCTAssertEqual(components.year, 2026)
-        XCTAssertEqual(components.month, 8)
-        XCTAssertEqual(components.day, 19)
+final class CalendarDayTests: XCTestCase {
+    func testStoredDayReadsTheSameInEveryTimeZone() {
+        // The bug this replaces: a date saved as local midnight in Tokyo read
+        // as the previous day in Los Angeles.
+        let picked = calendar("Asia/Tokyo").date(from: DateComponents(year: 2026, month: 8, day: 19))!
+        let day = CalendarDay(localDate: picked, calendar: calendar("Asia/Tokyo"))
+        let stored = day.storedDate
+
+        XCTAssertEqual(CalendarDay(stored: stored), CalendarDay(year: 2026, month: 8, day: 19))
+        for zone in ["America/Los_Angeles", "Europe/London", "Asia/Tokyo", "Pacific/Auckland", "Pacific/Kiritimati"] {
+            let local = CalendarDay(stored: stored).localDate(calendar: calendar(zone))
+            let c = calendar(zone).dateComponents([.year, .month, .day], from: local)
+            XCTAssertEqual([c.year, c.month, c.day], [2026, 8, 19], "wrong day in \(zone)")
+        }
+    }
+}
+
+final class ImportantDateTests: XCTestCase {
+    private let la = calendar("America/Los_Angeles")
+
+    private func important(_ year: Int, _ month: Int, _ day: Int, repeats: Bool = true) -> ImportantDate {
+        ImportantDate(id: "1", label: "Anniversary", date: CalendarDay(year: year, month: month, day: day).storedDate, repeatsAnnually: repeats, createdBy: "uidA")
+    }
+
+    func testNextOccurrenceReturnsSameYearWhenUpcoming() {
+        let now = la.date(from: DateComponents(year: 2026, month: 3, day: 1))!
+        let next = important(2020, 8, 19).nextOccurrence(now: now, calendar: la)
+        let components = la.dateComponents([.year, .month, .day], from: next)
+        XCTAssertEqual([components.year, components.month, components.day], [2026, 8, 19])
     }
 
     func testNextOccurrenceRollsForwardWhenAlreadyPassedThisYear() {
-        let calendar = Calendar(identifier: .gregorian)
-        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
-        let anniversary = calendar.date(from: DateComponents(year: 2020, month: 8, day: 19))!
-        let date = ImportantDate(id: "1", label: "Anniversary", date: anniversary, repeatsAnnually: true, createdBy: "uidA")
-
-        let next = date.nextOccurrence(now: now, calendar: calendar)
-        let components = calendar.dateComponents([.year, .month, .day], from: next)
-        XCTAssertEqual(components.year, 2027)
-        XCTAssertEqual(components.month, 8)
-        XCTAssertEqual(components.day, 19)
+        let now = la.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let next = important(2020, 8, 19).nextOccurrence(now: now, calendar: la)
+        let components = la.dateComponents([.year, .month, .day], from: next)
+        XCTAssertEqual([components.year, components.month, components.day], [2027, 8, 19])
     }
 
-    func testNonRepeatingDateIsReturnedAsIs() {
-        let calendar = Calendar(identifier: .gregorian)
-        let weddingDate = calendar.date(from: DateComponents(year: 2019, month: 6, day: 1))!
-        let date = ImportantDate(id: "2", label: "Wedding", date: weddingDate, repeatsAnnually: false, createdBy: "uidA")
+    func testYearlyDateThatIsTodayIsTodayNotNextYear() {
+        // Was rolled forward a year: the candidate (midnight) was compared
+        // against the current instant, which is always later on the day.
+        let now = la.date(from: DateComponents(year: 2026, month: 8, day: 19, hour: 15, minute: 30))!
+        let date = important(2020, 8, 19)
+        XCTAssertEqual(date.daysUntilNextOccurrence(now: now, calendar: la), 0)
+        XCTAssertFalse(date.isPast(now: now, calendar: la))
+    }
 
-        XCTAssertEqual(date.nextOccurrence(now: Date(), calendar: calendar), weddingDate)
+    func testNonRepeatingDateKeepsItsDayAndCanBePast() {
+        let date = important(2019, 6, 1, repeats: false)
+        let next = date.nextOccurrence(now: Date(), calendar: la)
+        let components = la.dateComponents([.year, .month, .day], from: next)
+        XCTAssertEqual([components.year, components.month, components.day], [2019, 6, 1])
+        XCTAssertTrue(date.isPast(now: Date(), calendar: la))
+        XCTAssertLessThan(date.daysUntilNextOccurrence(now: Date(), calendar: la), 0)
+    }
+}
+
+final class MeetupPlannerTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func visit(_ id: String, hoursFromNow: Double) -> Visit {
+        Visit(id: id, start: now.addingTimeInterval(hoursFromNow * 3600), note: nil, createdBy: "uidA")
+    }
+
+    func testNextUpcomingSkipsPastVisitsAndPicksTheEarliest() {
+        let visits = [visit("past", hoursFromNow: -5), visit("later", hoursFromNow: 72), visit("soon", hoursFromNow: 10)]
+        XCTAssertEqual(MeetupPlanner.nextUpcoming(visits, now: now)?.id, "soon")
+        XCTAssertNil(MeetupPlanner.nextUpcoming([visit("past", hoursFromNow: -1)], now: now))
+    }
+
+    func testResolvedPicksTheSoonerOfCurrentAndPlanned() {
+        let visits = [visit("a", hoursFromNow: 48)]
+        // No date yet, or a date already passed: follow the plan.
+        XCTAssertEqual(MeetupPlanner.resolvedNextMeetup(current: nil, visits: visits, now: now), visits[0].start)
+        XCTAssertEqual(MeetupPlanner.resolvedNextMeetup(current: now.addingTimeInterval(-60), visits: visits, now: now), visits[0].start)
+        // An earlier date set before visits existed is kept.
+        let earlier = now.addingTimeInterval(3600)
+        XCTAssertEqual(MeetupPlanner.resolvedNextMeetup(current: earlier, visits: visits, now: now), earlier)
+    }
+
+    func testRemovingTheCurrentVisitMovesOnToTheNextOrNone() {
+        let a = visit("a", hoursFromNow: 24)
+        let b = visit("b", hoursFromNow: 96)
+        XCTAssertEqual(MeetupPlanner.resolvedNextMeetup(current: a.start, visits: [b], removed: a, now: now), b.start)
+        XCTAssertNil(MeetupPlanner.resolvedNextMeetup(current: a.start, visits: [], removed: a, now: now))
+        // Removing some other visit leaves the current one alone.
+        XCTAssertEqual(MeetupPlanner.resolvedNextMeetup(current: a.start, visits: [a], removed: b, now: now), a.start)
+    }
+
+    func testNormalizedTrimsToTheMinute() {
+        let start = Date(timeIntervalSince1970: 1_800_000_123.456)
+        XCTAssertEqual(MeetupPlanner.normalized(start).timeIntervalSince1970, 1_800_000_120)
+    }
+}
+
+final class RelativeDayTests: XCTestCase {
+    func testLabels() {
+        XCTAssertEqual(CountdownFormatter.relativeDayLabel(0), "Today")
+        XCTAssertEqual(CountdownFormatter.relativeDayLabel(1), "Tomorrow")
+        XCTAssertEqual(CountdownFormatter.relativeDayLabel(12), "in 12 days")
+        XCTAssertEqual(CountdownFormatter.relativeDayLabel(-1), "Yesterday")
+        XCTAssertEqual(CountdownFormatter.relativeDayLabel(-3), "3 days ago")
+    }
+
+    func testCalendarDaysIgnoresTimeOfDay() {
+        let la = calendar("America/Los_Angeles")
+        let lateTonight = la.date(from: DateComponents(year: 2026, month: 9, day: 24, hour: 23, minute: 50))!
+        let earlyTomorrow = la.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 0, minute: 10))!
+        XCTAssertEqual(CountdownFormatter.calendarDays(from: lateTonight, to: earlyTomorrow, calendar: la), 1)
     }
 }
 
@@ -112,5 +196,9 @@ final class AppGroupCacheTests: XCTestCase {
         cache.write(state)
         let readBack = cache.read()
         XCTAssertEqual(readBack, state)
+
+        // Sign-out / leaving a pairing must stop the widget showing it.
+        cache.clear()
+        XCTAssertNil(cache.read())
     }
 }

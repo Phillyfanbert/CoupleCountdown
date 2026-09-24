@@ -9,6 +9,8 @@ import Foundation
 public struct ImportantDate: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var label: String
+    /// The stored Firestore value: 12:00 UTC on the day (see `CalendarDay`).
+    /// Use `day` rather than reading this with local components.
     public var date: Date
     public var repeatsAnnually: Bool
     public var createdBy: String
@@ -21,21 +23,42 @@ public struct ImportantDate: Codable, Equatable, Identifiable, Sendable {
         self.createdBy = createdBy
     }
 
-    /// The next occurrence to count down to. If `repeatsAnnually` and this
-    /// year's date has already passed, rolls forward to next year rather
-    /// than counting into negative days (DESIGN.md §7.4).
+    /// The calendar day this date is on — the same for both partners,
+    /// whatever their time zones.
+    public var day: CalendarDay {
+        CalendarDay(stored: date)
+    }
+
+    /// The next occurrence to count down to, as local midnight of that day.
+    /// A yearly date rolls forward to next year only once its day has fully
+    /// passed — on the day itself it's "today", not 365 days away (compared
+    /// against the start of today, not the current instant). A one-off date
+    /// is returned as-is, even if past.
     public func nextOccurrence(now: Date = Date(), calendar: Calendar = .current) -> Date {
-        guard repeatsAnnually else { return date }
+        let day = self.day
+        guard repeatsAnnually else { return day.localDate(calendar: calendar) }
 
-        let monthDay = calendar.dateComponents([.month, .day], from: date)
-        var candidateComponents = calendar.dateComponents([.year, .month, .day], from: now)
-        candidateComponents.month = monthDay.month
-        candidateComponents.day = monthDay.day
-
-        guard let candidate = calendar.date(from: candidateComponents) else { return date }
-        if candidate >= now {
-            return candidate
+        let today = calendar.startOfDay(for: now)
+        let thisYear = calendar.component(.year, from: today)
+        for year in [thisYear, thisYear + 1] {
+            // Feb 29 in a non-leap year resolves to Mar 1, which is fine.
+            if let candidate = calendar.date(from: DateComponents(year: year, month: day.month, day: day.day)),
+               candidate >= today {
+                return candidate
+            }
         }
-        return calendar.date(byAdding: .year, value: 1, to: candidate) ?? candidate
+        return day.localDate(calendar: calendar)
+    }
+
+    /// Whole days from today to the next occurrence: 0 is today, negative
+    /// only for a one-off date that has passed.
+    public func daysUntilNextOccurrence(now: Date = Date(), calendar: Calendar = .current) -> Int {
+        let today = calendar.startOfDay(for: now)
+        return calendar.dateComponents([.day], from: today, to: nextOccurrence(now: now, calendar: calendar)).day ?? 0
+    }
+
+    /// A one-off date whose day is behind us (yearly dates never are).
+    public func isPast(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        !repeatsAnnually && daysUntilNextOccurrence(now: now, calendar: calendar) < 0
     }
 }

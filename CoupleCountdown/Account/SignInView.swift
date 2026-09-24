@@ -22,6 +22,26 @@ struct SignInView: View {
 
     private let firestore = FirestoreService()
 
+    /// This iPhone still holds a pairing from before accounts existed (an
+    /// anonymous identity that's a participant in it).
+    private var hasLegacyPairing: Bool {
+        authService.hasLegacyAnonymousSession &&
+            UserDefaults(suiteName: SharedIdentifiers.appGroup)?.string(forKey: "coupleId")?.isEmpty == false
+    }
+
+    private var introText: String {
+        switch (mode, hasLegacyPairing) {
+        case (.createAccount, true):
+            return "Create an account to keep the pairing on this iPhone — then sign in with it on your computer too."
+        case (.signIn, true):
+            // Signing in replaces the old identity, and a pairing's members
+            // can't be changed afterwards — so that pairing would be lost.
+            return "This iPhone has a pairing from before accounts. Signing in to an existing account leaves it behind for good — create an account instead to keep it."
+        default:
+            return "Use the same account in this app and on the web — you'll see the same countdown on your phone and your computer."
+        }
+    }
+
     private var canSubmit: Bool {
         !isWorking && !email.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty &&
             (mode == .signIn || !name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -37,13 +57,12 @@ struct SignInView: View {
                 Text(mode == .createAccount ? "Create your account" : "Welcome back")
                     .font(.system(.title2, design: .rounded, weight: .semibold))
 
-                Text(authService.hasLegacyAnonymousSession && mode == .createAccount
-                     ? "Create an account to keep the pairing on this iPhone — then sign in with it on your computer too."
-                     : "Use the same account in this app and on the web — you'll see the same countdown on your phone and your computer.")
+                Text(introText)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(hasLegacyPairing && mode == .signIn ? Color.red : Color.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 12)
+                    .accessibilityIdentifier("authIntroText")
 
                 VStack(spacing: 12) {
                     if mode == .createAccount {

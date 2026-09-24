@@ -24,19 +24,31 @@ struct CountdownTimelineProvider: TimelineProvider {
         // First-run empty state: no cache yet if the widget's added
         // before pairing completes (§6) — `state` being nil here is
         // exactly that case, not an error.
-        CountdownEntry(date: Date(), state: cache.read())
+        CountdownEntry(date: Date(), state: cachedStateIfPaired())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (CountdownEntry) -> Void) {
-        completion(CountdownEntry(date: Date(), state: cache.read()))
+        completion(CountdownEntry(date: Date(), state: cachedStateIfPaired()))
+    }
+
+    /// The app removes the App Group coupleId on sign-out and when the
+    /// account leaves or cancels its pairing. Without a pairing the widget
+    /// shows its not-paired state — it used to fall back to the cached
+    /// state regardless, so the previous account's countdown stayed on the
+    /// Home Screen indefinitely.
+    private var currentCoupleId: String? {
+        let coupleId = UserDefaults(suiteName: SharedIdentifiers.appGroup)?.string(forKey: "coupleId")
+        return (coupleId?.isEmpty == false) ? coupleId : nil
+    }
+
+    private func cachedStateIfPaired() -> RelationshipState? {
+        currentCoupleId == nil ? nil : cache.read()
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CountdownEntry>) -> Void) {
         Task {
-            let coupleId = UserDefaults(suiteName: SharedIdentifiers.appGroup)?.string(forKey: "coupleId")
-
-            var state = cache.read()
-            if let coupleId, !coupleId.isEmpty,
+            var state = cachedStateIfPaired()
+            if let coupleId = currentCoupleId,
                let fresh = await client.fetchRelationshipState(coupleId: coupleId) {
                 state = fresh
                 cache.write(fresh)
@@ -46,7 +58,14 @@ struct CountdownTimelineProvider: TimelineProvider {
             // (§5.5 failure-mode behavior).
 
             let entry = CountdownEntry(date: Date(), state: state)
-            // Single entry — Text(timerInterval:) handles the digit
+            // A second entry at the meetup moment, so the widget switches to
+            // "The day is here" on time instead of sitting at 0:00 until the
+            // next refresh.
+            var entries = [entry]
+            if let state, state.status == .apart, let meetup = state.nextMeetupDate, meetup > entry.date {
+                entries.append(CountdownEntry(date: meetup, state: state))
+            }
+            // Otherwise one entry — Text(timerInterval:) handles the digit
             // ticking on its own, so there's no need to pre-generate a
             // series of future entries. `.after(~30 min)` is a request,
             // not a guarantee; WidgetKit's actual cadence is still
@@ -54,7 +73,7 @@ struct CountdownTimelineProvider: TimelineProvider {
             // `.atEnd` with one entry risks hammering the refresh budget
             // (§6).
             let nextRefresh = Date().addingTimeInterval(30 * 60)
-            completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
+            completion(Timeline(entries: entries, policy: .after(nextRefresh)))
         }
     }
 }

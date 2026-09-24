@@ -34,4 +34,10 @@ public struct AppGroupCache {
         guard let data = defaults?.data(forKey: stateKey) else { return nil }
         return try? JSONDecoder().decode(RelationshipState.self, from: data)
     }
+
+    /// Forget the cached pairing — on sign-out, or when the account leaves
+    /// or cancels its pairing — so the widget stops showing it.
+    public func clear() {
+        defaults?.removeObject(forKey: stateKey)
+    }
 }

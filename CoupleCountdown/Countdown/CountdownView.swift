@@ -6,12 +6,14 @@ import CoupleCountdownKit
 struct CountdownView: View {
     let coupleId: String
     let uid: String
+    /// This person's name from their account — used to fill in their entry
+    /// on the couple doc if a join's second write never landed.
+    let displayName: String?
 
     @StateObject private var sync: SyncCoordinator
     @StateObject private var viewModel: CountdownViewModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
-    @State private var pendingDate = Date().addingTimeInterval(7 * 86_400)
     @State private var celebrationMessage: String?
     @State private var isConfirmingCancel = false
     @State private var cancelError: String?
@@ -30,9 +32,10 @@ struct CountdownView: View {
 
     private let firestore: FirestoreService
 
-    init(coupleId: String, uid: String) {
+    init(coupleId: String, uid: String, displayName: String? = nil) {
         self.coupleId = coupleId
         self.uid = uid
+        self.displayName = displayName
         let firestore = FirestoreService()
         self.firestore = firestore
         _sync = StateObject(wrappedValue: SyncCoordinator(
@@ -70,10 +73,14 @@ struct CountdownView: View {
                     .accessibilityIdentifier("statsNavLink")
                 }
                 ToolbarItem(placement: .secondaryAction) {
-                    NavigationLink { ImportantDatesListView(coupleId: coupleId) } label: {
-                        Label("Important Dates", systemImage: "calendar.badge.clock")
+                    NavigationLink {
+                        CalendarScreen(coupleId: coupleId) { newState in
+                            sync.applyLocalWrite(newState)
+                        }
+                    } label: {
+                        Label("Calendar", systemImage: "calendar")
                     }
-                    .accessibilityIdentifier("importantDatesNavLink")
+                    .accessibilityIdentifier("calendarNavLink")
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink { SettingsView() } label: {
@@ -118,9 +125,13 @@ struct CountdownView: View {
         .onChange(of: sync.state) { _, newState in
             guard let newState else { return }
             Task { await checkForMilestones(state: newState) }
+            Task { await ensureOwnProfile(state: newState) }
         }
-        .sheet(isPresented: $viewModel.promptForDate) {
-            datePromptSheet
+        .sheet(isPresented: Binding(
+            get: { viewModel.visitSheetPurpose != nil },
+            set: { if !$0 { viewModel.visitSheetPurpose = nil } }
+        )) {
+            visitSheet
         }
         .overlay {
             if let celebrationMessage {
@@ -142,11 +153,23 @@ struct CountdownView: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 20) {
+            // "Keeping track of the current date": today, updated each minute.
+            TimelineView(.everyMinute) { context in
+                Text("Today is \(context.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("todayText")
+            }
+
             if let state = sync.state {
                 if state.participantUIDs.count < 2 {
                     waitingForPartnerCard
                 }
-                countdownCard(state: state)
+                // Re-evaluated every 30s so the card switches from the
+                // countdown to "the day is here" when the meetup arrives.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    countdownCard(state: state, now: context.date)
+                }
                 statusBadge(state: state)
                 partnerTimeZones(state: state)
 
@@ -228,14 +251,26 @@ struct CountdownView: View {
             // on this account to onboarding.
             try await firestore.cancelPairing(coupleId: coupleId, uid: uid)
         } catch {
-            cancelError = "Couldn't cancel — check your connection and try again."
+            // The rules refuse to cancel once the partner has joined, so the
+            // likely reason is that they just did.
+            cancelError = "Couldn't cancel — your partner may have just joined. If not, check your connection and try again."
         }
     }
 
     @ViewBuilder
-    private func countdownCard(state: RelationshipState) -> some View {
+    private func countdownCard(state: RelationshipState, now: Date) -> some View {
         VStack(spacing: 8) {
-            if let nextMeetupDate = state.nextMeetupDate {
+            if state.status == .together {
+                // Used to keep ticking "Until we're together again" against
+                // the old date while they were in fact together.
+                Text("💞").font(.largeTitle)
+                Text("You're together")
+                    .font(.headline)
+                    .accessibilityIdentifier("togetherText")
+                Text("Enjoy every minute.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if let nextMeetupDate = state.nextMeetupDate, nextMeetupDate > now {
                 Text("Until we're together again")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -245,16 +280,38 @@ struct CountdownView: View {
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                     .accessibilityIdentifier("countdownText")
+                Text(nextMeetupDate, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("meetupTargetText")
+                Button("Change date") { viewModel.visitSheetPurpose = .change }
+                    .font(.footnote)
+                    .accessibilityIdentifier("changeMeetupButton")
+            } else if state.nextMeetupDate != nil {
+                Text("🎉").font(.largeTitle)
+                Text("The day is here")
+                    .font(.headline)
+                    .accessibilityIdentifier("dayIsHereText")
+                Text("Tap “We're together now” when you meet — or pick a new date if plans changed.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Pick a new date") { viewModel.visitSheetPurpose = .plan }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("planVisitButton")
             } else {
                 // No-date-set state applies immediately after pairing
                 // too, not just the "leaving again" edge case (§6, §8).
                 Image(systemName: "calendar.badge.plus")
                     .font(.largeTitle)
                     .foregroundStyle(theme.accentColor)
-                Text("No date set yet")
+                Text("No visit planned yet")
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("noDateSetText")
+                Button("Plan your next visit") { viewModel.visitSheetPurpose = .plan }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("planVisitButton")
             }
         }
         .padding(24)
@@ -295,56 +352,55 @@ struct CountdownView: View {
         }
     }
 
-    /// Was previously just `Task { await viewModel.toggleStatus(...) }`
-    /// with nothing done on success — the write reached Firestore but
-    /// never reached SyncCoordinator, so the acting partner's own widget
-    /// only updated once the realtime listener happened to echo the
-    /// write back (a network round-trip §5.2 explicitly says shouldn't
-    /// be needed for this exact case).
+    /// Also applies the result to SyncCoordinator right away, so the acting
+    /// partner's own widget updates without waiting for the listener to echo
+    /// the write back (§5.2's sync pipeline convention).
     private func toggleStatus(state: RelationshipState) async {
-        let newStatus: RelationshipState.Status = state.status == .apart ? .together : .apart
-        let succeeded = await viewModel.toggleStatus(current: state.status, nextMeetupDate: state.nextMeetupDate)
-        guard succeeded else { return }
         var updated = state
-        updated.status = newStatus
-        updated.lastUpdatedBy = uid
-        updated.lastUpdatedAt = Date()
-        sync.applyLocalWrite(updated)
-    }
-
-    private var datePromptSheet: some View {
-        NavigationStack {
-            Form {
-                DatePicker("Next meetup", selection: $pendingDate, displayedComponents: .date)
-                    .accessibilityIdentifier("nextMeetupDatePicker")
-                // Previously only shown in the underlying view, which is
-                // covered while this sheet is presented — a save failure
-                // here was invisible to the user.
-                if let errorMessage = viewModel.errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.caption)
-                }
-            }
-            .navigationTitle("When do you leave? ✈️")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await saveDate() }
-                    }
-                    .tint(theme.accentColor)
-                    .accessibilityIdentifier("saveDateButton")
-                }
-            }
+        if state.status == .apart {
+            guard await viewModel.markTogether() else { return }
+            updated.status = .together
+        } else {
+            // nil means the visit sheet opened (nothing planned) or it failed.
+            guard let next = await viewModel.leave() else { return }
+            updated.status = .apart
+            updated.nextMeetupDate = next
         }
-    }
-
-    private func saveDate() async {
-        let succeeded = await viewModel.setNextMeetupDate(pendingDate, currentStatus: sync.state?.status ?? .together)
-        guard succeeded, var updated = sync.state else { return }
-        updated.status = .apart
-        updated.nextMeetupDate = pendingDate
         updated.lastUpdatedBy = uid
         updated.lastUpdatedAt = Date()
         sync.applyLocalWrite(updated)
+    }
+
+    @ViewBuilder
+    private var visitSheet: some View {
+        let purpose = viewModel.visitSheetPurpose
+        VisitPlannerSheet(
+            title: purpose == .change ? "Change the date ✈️" : "When do you see each other next? ✈️",
+            initialStart: purpose == .change ? sync.state?.nextMeetupDate : nil,
+            errorMessage: viewModel.errorMessage,
+            onSave: { start, note in
+                guard let state = sync.state,
+                      let updated = await viewModel.saveVisit(start: start, note: note, current: state)
+                else { return }
+                sync.applyLocalWrite(updated)
+            },
+            onCancel: { viewModel.visitSheetPurpose = nil }
+        )
+    }
+
+    /// A join whose second write failed leaves this person without a name
+    /// on the couple doc (their partner sees no name or clock for them).
+    private func ensureOwnProfile(state: RelationshipState) async {
+        guard state.participantUIDs.contains(uid),
+              state.partnerProfiles[uid] == nil,
+              let displayName, !displayName.isEmpty
+        else { return }
+        try? await firestore.ensurePartnerProfile(
+            coupleId: coupleId,
+            uid: uid,
+            displayName: displayName,
+            timeZoneIdentifier: TimeZone.current.identifier
+        )
     }
 
     // MARK: - Milestone celebration (§7.3)

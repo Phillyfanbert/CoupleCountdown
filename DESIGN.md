@@ -693,6 +693,42 @@ mini version of the core countdown:
   apart/together state machine (§8), so they don't interact with that logic
   at all.
 
+### 7.5 Planned visits and the Calendar (added after v1 review)
+
+A code review against the core goal — "a couples countdown and calendar
+scheduling, tracking the current date, with countdowns to meeting times" —
+found the single `nextMeetupDate` model fell short, so it now follows a plan:
+
+- **Visits** live in `couples/{id}/visits/{visitId}`: `start` (a true instant,
+  picked as a date *and time* — the countdown ends when you actually meet),
+  optional `note`, `createdBy`. A couple can plan any number.
+- **`nextMeetupDate` follows the plan.** It stays on the couple doc (the
+  widget and the main countdown read it), set to the earliest upcoming visit
+  by `MeetupPlanner.resolvedNextMeetup` (Swift) / `resolvedNextMeetup`
+  (web/logic.js): a still-upcoming date set before visits existed is kept
+  unless a planned visit comes sooner; deleting the visit it pointed at moves
+  it to the next one. "Leaving again" counts down to the next planned visit
+  and only asks for a date when none is planned — before, it reused the old,
+  already-passed date, and the iPhone had no way to enter the next one.
+- **Countdown states**: together (no timer — it used to keep ticking),
+  counting (with the target shown as e.g. "Sun, Oct 4 at 6:30 PM" and a
+  Change button that replaces it), the day is here, and nothing planned.
+  Both apps also show today's date. The widget mirrors these states and gets
+  a timeline entry at the meetup moment.
+- **Calendar** (both apps): a month grid with markers for visits and
+  important dates, tap a day to see it, an upcoming list with "Today / in N
+  days" countdowns (past items separately, below), add and delete.
+- **Calendar days are time-zone-proof.** An important date is a day, not an
+  instant: stored as 12:00 UTC on that day and always read back with UTC
+  components (`CalendarDay` in Swift, `storedFromLocalDay` / `dayFromStored`
+  on web). Local midnight, the old encoding, showed dates a day early to a
+  partner further west. Reading UTC noon with *local* components would still
+  fail at UTC+12 and beyond, hence UTC reads. Entries saved before this change
+  keep working west of UTC but may show a day off east of it.
+- **Cancelling a pairing** is only allowed while nobody has joined
+  (rules: `closed` can't be set once `participantUIDs.size() == 2`), closing
+  a race where a creator cancelling as their partner joined stranded the partner.
+
 ## 8. State machine
 
 ```

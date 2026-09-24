@@ -99,7 +99,7 @@ struct AccountSessionView: View {
                 .themedBackground()
             case .ready(let profile):
                 if let coupleId = profile.coupleId, !coupleId.isEmpty, !holdingNewCode {
-                    CountdownView(coupleId: coupleId, uid: uid)
+                    CountdownView(coupleId: coupleId, uid: uid, displayName: profile.displayName)
                         .id(coupleId) // fresh sync state if the pairing changes
                 } else {
                     OnboardingView(uid: uid, profileName: profile.displayName, holdingNewCode: $holdingNewCode)
@@ -112,6 +112,9 @@ struct AccountSessionView: View {
             guard case .ready(let profile) = newState else { return }
             let coupleId = profile.coupleId ?? ""
             if widgetCoupleId != coupleId {
+                // The cached state belongs to the old pairing (or none) —
+                // drop it so the widget can't keep showing it.
+                AppGroupCache(suiteName: SharedIdentifiers.appGroup).clear()
                 widgetCoupleId = coupleId
                 WidgetCenter.shared.reloadAllTimelines()
             }

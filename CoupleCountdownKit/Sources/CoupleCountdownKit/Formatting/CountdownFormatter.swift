@@ -3,6 +3,24 @@
 import Foundation
 
 public enum CountdownFormatter {
+    /// Whole calendar days from `from`'s day to `to`'s day in `calendar`
+    /// (0 = same day), regardless of the times of day involved.
+    public static func calendarDays(from: Date, to: Date, calendar: Calendar = .current) -> Int {
+        calendar.dateComponents([.day], from: calendar.startOfDay(for: from), to: calendar.startOfDay(for: to)).day ?? 0
+    }
+
+    /// "Today", "Tomorrow", "in 12 days", "Yesterday", "3 days ago" —
+    /// matches relativeDayLabel in web/logic.js.
+    public static func relativeDayLabel(_ days: Int) -> String {
+        switch days {
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case -1: return "Yesterday"
+        case 2...: return "in \(days) days"
+        default: return "\(-days) days ago"
+        }
+    }
+
     /// The date range to hand to SwiftUI's `Text(timerInterval:countsDown:)`
     /// — the OS handles the actual digit ticking from this, so this just
     /// needs to be a valid, stable interval (DESIGN.md §6).

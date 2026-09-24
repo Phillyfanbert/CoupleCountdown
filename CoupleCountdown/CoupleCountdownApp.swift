@@ -53,6 +53,7 @@ struct CoupleCountdownApp: App {
                 // Signed out: the widget shouldn't keep showing this account's pairing.
                 if uid == nil {
                     UserDefaults(suiteName: SharedIdentifiers.appGroup)?.removeObject(forKey: "coupleId")
+                    AppGroupCache(suiteName: SharedIdentifiers.appGroup).clear()
                     WidgetCenter.shared.reloadAllTimelines()
                 }
             }

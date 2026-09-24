@@ -22,8 +22,15 @@ import {
   computeStats,
   countdownParts,
   daysUntil,
+  defaultVisitStart,
+  localISODate,
   localTimeLabel,
+  monthCells,
   nextOccurrence,
+  nextUpcoming,
+  parseLocalISODate,
+  relativeDayLabel,
+  resolvedNextMeetup,
 } from "./logic.js";
 
 const fbApp = initializeApp(firebaseConfig);
@@ -55,7 +62,6 @@ const THEMES = [
 const S = {
   user: null, // signed-in account (never an anonymous user)
   api: null,
-  profile: null, // users/{uid} once loaded
   name: "",
   coupleId: "",
   prefillCode: normalizeCode(new URLSearchParams(location.search).get("join") || ""),
@@ -66,6 +72,9 @@ const S = {
   tab: "home",
   couple: null,
   loadError: null,
+  plan: { visits: [], dates: [], loaded: false, error: null }, // visits + important dates
+  calMonth: null, // { y, m } shown on the Calendar tab
+  calSelected: null, // "YYYY-MM-DD" selected on the Calendar tab
   unsubProfile: null,
   unsubCouple: null,
   busy: false,
@@ -112,12 +121,6 @@ function authMessage(e) {
   return "Couldn't sign in — try again.";
 }
 
-/** Local-calendar YYYY-MM-DD, `n` days from today (toISOString would use UTC and can be a day off). */
-function isoDate(n = 0) {
-  const d = new Date(Date.now() + n * 86_400_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function applyTheme(id) {
   const theme = THEMES.find((t) => t.id === id) || THEMES[0];
   document.documentElement.dataset.theme = theme.id;
@@ -146,7 +149,7 @@ function boot() {
 function endSession() {
   S.unsubProfile?.();
   S.unsubCouple?.();
-  Object.assign(S, { unsubProfile: null, unsubCouple: null, user: null, api: null, profile: null, name: "", coupleId: "", couple: null, loadError: null });
+  Object.assign(S, { unsubProfile: null, unsubCouple: null, user: null, api: null, name: "", coupleId: "", couple: null, loadError: null });
 }
 
 function startSession(user) {
@@ -186,7 +189,6 @@ function onProfile(snap) {
   // Offline with nothing cached: we don't know the account's state yet.
   if (snap.metadata.fromCache && !snap.exists()) return;
   const p = snap.data() || {};
-  S.profile = p;
   S.name = p.displayName || "";
   if (p.coupleId) {
     if (p.coupleId !== S.coupleId || S.screen !== "main") {
@@ -253,8 +255,12 @@ function renderAuth() {
   mount(h("div", { class: "stack" }, headerTop(),
     h("div", { class: "card stack" },
       h("h2", {}, signup ? "Create your account" : "Welcome back"),
-      h("p", { class: "muted small" }, upgrading
-        ? "Create an account to keep the pairing on this browser — then sign in with it on your phone and computer."
+      h("p", { class: `small ${upgrading && !signup ? "error" : "muted"}`, id: "authIntro" }, upgrading
+        ? signup
+          ? "Create an account to keep the pairing on this browser — then sign in with it on your phone and computer."
+          // Signing in replaces the old identity, and a pairing's members
+          // can't change afterwards — so that pairing would be lost for good.
+          : "This browser has a pairing from before accounts. Signing in to an existing account leaves it behind for good — create an account instead to keep it."
         : "Use the same account on your phone, your computer, and the iPhone app — you'll see the same countdown everywhere."),
       form, note,
       h("div", { class: "row spread" }, toggle, forgot))));
@@ -434,7 +440,7 @@ function joinView() {
 // ---------- main shell ----------
 const TABS = [
   ["home", "Countdown"],
-  ["dates", "Dates"],
+  ["calendar", "Calendar"],
   ["stats", "Stats"],
   ["settings", "Settings"],
 ];
@@ -444,8 +450,10 @@ function enterMain() {
   S.tab = "home";
   S.couple = null;
   S.loadError = null;
+  S.plan = { visits: [], dates: [], loaded: false, error: null };
   renderShell();
   listen();
+  loadPlan();
 }
 
 function listen() {
@@ -464,6 +472,7 @@ function listen() {
           partnerProfiles: d.partnerProfiles || {},
         };
         S.loadError = null;
+        ensureOwnProfile();
       }
       if (S.tab === "home" || S.tab === "settings") renderTab();
     },
@@ -475,19 +484,42 @@ function listen() {
   );
 }
 
+/** A join whose second write failed leaves this person nameless on the couple doc. */
+function ensureOwnProfile() {
+  const c = S.couple;
+  if (!c || !S.name || !c.participantUIDs.includes(S.user?.uid) || c.partnerProfiles[S.user.uid]) return;
+  S.api.ensurePartnerProfile(S.coupleId, S.name, timeZone()).catch((e) => console.error("ensurePartnerProfile failed", e));
+}
+
+/** Visits and important dates, shared by the countdown's "Coming up" and the Calendar tab. */
+async function loadPlan() {
+  try {
+    const [visits, dates] = await Promise.all([S.api.fetchVisits(S.coupleId), S.api.fetchImportantDates(S.coupleId)]);
+    S.plan = { visits, dates, loaded: true, error: null };
+  } catch (e) {
+    console.error("loadPlan failed", e);
+    S.plan = { ...S.plan, loaded: true, error: "Couldn't load your plans — switch tabs to try again." };
+  }
+  if (S.screen === "main" && (S.tab === "home" || S.tab === "calendar")) renderTab();
+}
+
 function renderShell() {
   const nav = h("nav", { class: "tabs" }, TABS.map(([id, label]) =>
-    h("button", { "data-tab": id, "aria-current": S.tab === id ? "page" : null, onclick: () => { S.tab = id; renderShell(); } }, label)));
-  mount(h("div", {}, headerTop(), nav, h("div", { id: "content" })));
+    h("button", { "data-tab": id, "aria-current": S.tab === id ? "page" : null, onclick: () => {
+      S.tab = id;
+      renderShell();
+      if (id === "home" || id === "calendar") loadPlan();
+    } }, label)));
+  mount(h("div", { class: `shell tab-${S.tab}` }, headerTop(), nav, h("div", { id: "content" })));
   renderTab();
 }
 
 function renderTab() {
   const content = document.getElementById("content");
   if (!content) return;
-  const views = { home: homeView, dates: datesView, stats: statsView, settings: settingsView };
+  const views = { home: homeView, calendar: calendarView, stats: statsView, settings: settingsView };
   content.replaceChildren(views[S.tab]());
-  updateUnits();
+  tick();
 }
 
 // ---------- home ----------
@@ -499,75 +531,114 @@ function homeView() {
   if (!c) return h("div", { class: "card center" }, h("p", { class: "muted" }, "Loading…"));
 
   const together = c.status === "together";
-  const parts = [];
+  const main = [];
 
-  if (c.participantUIDs.length < 2) parts.push(waitingCard());
+  // "Keeping track of the current date" — refreshed by tick().
+  main.push(h("p", { class: "today muted", id: "todayText" }, todayLabel()));
 
-  parts.push(countdownCard(c));
-  parts.push(h("div", { class: "row spread", style: "margin-bottom:16px" },
+  if (c.participantUIDs.length < 2) main.push(waitingCard());
+
+  main.push(countdownCard(c));
+  main.push(h("div", { class: "row spread", style: "margin-bottom:16px" },
     h("span", { class: "badge", id: "statusBadge" }, together ? "❤️ Together right now" : "🤍 Apart, for now")));
 
   const clocks = Object.values(c.partnerProfiles).map((p) => localTimeLabel(p.displayName, p.timeZoneIdentifier));
-  if (clocks.length) parts.push(h("p", { class: "muted small", id: "clocks" }, clocks.join("  ·  ")));
+  if (clocks.length) main.push(h("p", { class: "muted small", id: "clocks" }, clocks.join("  ·  ")));
 
   const error = h("p", { class: "error", id: "homeError", hidden: true });
   const toggle = h("button", { class: "btn primary", id: "toggleStatusButton", onclick: () => onToggle(toggle, error) },
     together ? "✈️ Leaving again" : "❤️ We're together now");
   const ping = h("button", { class: "btn", id: "thinkingOfYouButton", onclick: () => onPing(ping, error) }, "💌 Send a little “thinking of you”");
-  parts.push(h("div", { class: "stack" }, toggle, ping, error));
-  return h("div", {}, parts);
+  main.push(h("div", { class: "stack" }, toggle, ping, error));
+
+  // On a wide screen "Coming up" sits beside the countdown; on a phone, below it.
+  return h("div", { class: "columns" },
+    h("div", { class: "col-main" }, main),
+    h("div", { class: "col-side" }, comingUpCard({ limit: 5 })));
+}
+
+function todayLabel(now = new Date()) {
+  return `Today is ${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`;
+}
+
+/** Which of the four countdown states applies right now. */
+function countdownState(c, now = new Date()) {
+  if (c.status === "together") return "together";
+  if (!c.nextMeetupDate) return "none";
+  return c.nextMeetupDate > now ? "counting" : "arrived";
 }
 
 function countdownCard(c) {
-  if (c.status === "together") {
-    return h("div", { class: "card countdown" }, h("div", { class: "empty-big" }, "💞"), h("h2", {}, "You're together"), h("p", { class: "muted" }, "Enjoy every minute."));
+  const state = countdownState(c);
+  const card = (...kids) => h("div", { class: "card countdown", "data-state": state }, ...kids);
+  if (state === "together") {
+    // Previously the iPhone kept ticking "until we're together again" here.
+    return card(h("div", { class: "empty-big" }, "💞"), h("h2", { id: "togetherText" }, "You're together"), h("p", { class: "muted" }, "Enjoy every minute."));
   }
-  if (!c.nextMeetupDate) {
-    return h("div", { class: "card countdown" }, h("div", { class: "empty-big" }, "🗓️"), h("h2", { id: "noDateText" }, "No date set yet"), h("p", { class: "muted" }, "When do you see each other next?"), setDateButton("Set the date"));
+  if (state === "none") {
+    return card(h("div", { class: "empty-big" }, "🗓️"), h("h2", { id: "noDateText" }, "No visit planned yet"), h("p", { class: "muted" }, "When do you see each other next?"), planButton("Plan your next visit", "plan"));
   }
-  if (c.nextMeetupDate <= new Date()) {
-    return h("div", { class: "card countdown" }, h("div", { class: "empty-big" }, "🎉"), h("h2", {}, "The day is here"), h("p", { class: "muted" }, "Tap “We're together now” when you meet — or pick a new date if plans changed."), setDateButton("Pick a new date"));
+  if (state === "arrived") {
+    return card(h("div", { class: "empty-big" }, "🎉"), h("h2", {}, "The day is here"), h("p", { class: "muted" }, "Tap “We're together now” when you meet — or pick a new date if plans changed."), planButton("Pick a new date", "plan"));
   }
-  return h("div", { class: "card countdown" },
+  return card(
     h("div", { class: "label" }, "Until we're together again"),
     h("div", { class: "units", id: "units" },
-      ["days", "hours", "minutes", "seconds"].map((u) => h("div", { class: "unit" }, h("b", { id: `u-${u}` }, "–"), h("span", {}, u)))));
+      ["days", "hours", "minutes", "seconds"].map((u) => h("div", { class: "unit" }, h("b", { id: `u-${u}` }, "–"), h("span", {}, u)))),
+    h("p", { class: "muted small target", id: "meetupTargetText" }, formatWhen(c.nextMeetupDate)),
+    h("button", { class: "btn link", id: "changeMeetupButton", onclick: () => openVisitModal("change") }, "Change date"));
 }
 
-function setDateButton(label) {
-  return h("button", { class: "btn", id: "setDateButton", style: "margin-top:12px", onclick: () => openDateModal() }, label);
+function planButton(label, purpose) {
+  return h("button", { class: "btn", id: "planVisitButton", style: "margin-top:12px", onclick: () => openVisitModal(purpose) }, label);
 }
 
-function updateUnits() {
+/** "Thu, Oct 1 at 6:30 PM" in the viewer's own time. */
+function formatWhen(date) {
+  const day = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} at ${time}`;
+}
+
+/** Runs every second: countdown digits, today's date, and switching cards when the meetup arrives. */
+function tick() {
+  const today = document.getElementById("todayText");
+  if (today) today.textContent = todayLabel();
   const c = S.couple;
-  if (!c || c.status !== "apart" || !c.nextMeetupDate || !document.getElementById("units")) return;
+  if (!c || S.tab !== "home") return;
+  const card = document.querySelector(".card.countdown");
+  if (card && card.dataset.state !== countdownState(c)) {
+    renderTab();
+    return;
+  }
+  if (!document.getElementById("units")) return;
   const p = countdownParts(c.nextMeetupDate);
-  if (!p) { if (S.tab === "home") renderTab(); return; }
+  if (!p) return;
   for (const u of ["days", "hours", "minutes", "seconds"]) {
     const el = document.getElementById(`u-${u}`);
     if (el) el.textContent = String(p[u]).padStart(u === "days" ? 1 : 2, "0");
   }
 }
-setInterval(updateUnits, 1000);
+setInterval(tick, 1000);
 
 async function onToggle(button, error) {
   const c = S.couple;
   if (!c || S.busy) return;
-  const next = c.status === "apart" ? "together" : "apart";
-  // Every departure is a new trip, so always ask for the next date. (The
-  // iPhone app only asks when no date exists, so a second goodbye there
-  // shows the previous trip's expired countdown.)
-  if (next === "apart") {
-    openDateModal();
-    return;
-  }
   S.busy = true;
   button.disabled = true;
   error.hidden = true;
   try {
-    await S.api.setStatus(S.coupleId, next);
+    if (c.status === "apart") {
+      await S.api.setStatus(S.coupleId, "together");
+    } else {
+      // Every goodbye is a new trip: count down to the next *planned* visit,
+      // or ask for one if nothing is planned.
+      const next = nextUpcoming(await S.api.fetchVisits(S.coupleId));
+      if (next) await S.api.setStatus(S.coupleId, "apart", next.start);
+      else openVisitModal("leaving");
+    }
   } catch (e) {
-    console.error("setStatus failed", e);
+    console.error("toggle failed", e);
     error.textContent = "Couldn't update — check your connection and try again.";
     error.hidden = false;
   }
@@ -592,91 +663,242 @@ async function onPing(button, error) {
   }
 }
 
-function openDateModal() {
-  const input = h("input", { type: "date", id: "nextMeetupDateInput", value: isoDate(7), min: isoDate(0) });
+// ---------- modals ----------
+function openModal(title, label, ...content) {
+  const backdrop = h("div", { class: "modal-backdrop", onclick: (e) => { if (e.target === backdrop) backdrop.remove(); } },
+    h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": label }, h("h2", {}, title), ...content));
+  document.body.append(backdrop);
+  return () => backdrop.remove();
+}
+
+/**
+ * Plan a visit — a date *and time*, so the countdown ends when you actually
+ * meet (it used to end at midnight in whoever set it's time zone).
+ *   leaving: "Leaving again" with nothing planned — also switches to apart.
+ *   plan:    fill a missing or passed meetup.
+ *   change:  replace the meetup currently counted down to.
+ *   calendar: from the Calendar tab; the countdown follows the earliest plan.
+ */
+function openVisitModal(purpose, initial = null) {
+  const current = S.couple?.nextMeetupDate ?? null;
+  const start = initial ?? (purpose === "change" && current && current > new Date() ? current : defaultVisitStart());
+  const date = h("input", { type: "date", id: "visitDateInput", value: localISODate(start), min: localISODate(new Date()) });
+  const time = h("input", { type: "time", id: "visitTimeInput", value: `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}` });
+  const note = h("input", { type: "text", id: "visitNoteInput", placeholder: "Note (optional) — e.g. Sam lands at LAX", maxlength: "80" });
   const error = h("p", { class: "error", hidden: true });
-  const close = () => backdrop.remove();
   const save = h("button", { class: "btn primary", id: "saveDateButton", onclick: async () => {
-    if (!input.value) return;
-    const [y, m, d] = input.value.split("-").map(Number);
+    if (!date.value || !time.value) return;
+    const picked = parseLocalISODate(date.value);
+    const [hh, mm] = time.value.split(":").map(Number);
+    picked.setHours(hh, mm, 0, 0);
+    if (picked <= new Date()) {
+      error.textContent = "Pick a time in the future.";
+      error.hidden = false;
+      return;
+    }
     save.disabled = true;
+    error.hidden = true;
     try {
-      await S.api.setStatus(S.coupleId, "apart", new Date(y, m - 1, d));
+      await saveVisit(purpose, picked, note.value.trim());
       close();
     } catch (e) {
-      console.error("setStatus (date) failed", e);
-      error.textContent = "Couldn't save the date — check your connection and try again.";
+      console.error("saveVisit failed", e);
+      error.textContent = "Couldn't save the visit — check your connection and try again.";
       error.hidden = false;
       save.disabled = false;
     }
   } }, "Save");
-  const backdrop = h("div", { class: "modal-backdrop", onclick: (e) => { if (e.target === backdrop) close(); } },
-    h("div", { class: "modal stack", role: "dialog", "aria-modal": "true", "aria-label": "When do you see each other next?" },
-      h("h2", {}, "When do you leave? ✈️"),
-      h("label", { class: "field" }, "Next meetup", input),
-      error, save,
-      h("button", { class: "btn link", onclick: close }, "Cancel")));
-  document.body.append(backdrop);
-  input.focus();
+  const title = purpose === "change" ? "Change the date ✈️" : purpose === "calendar" ? "Plan a visit ✈️" : "When do you see each other next? ✈️";
+  const close = openModal(title, "Plan a visit",
+    h("div", { class: "row" }, h("label", { class: "field grow" }, "Date", date), h("label", { class: "field grow" }, "Time", time)),
+    h("label", { class: "field" }, "Note", note),
+    error, save,
+    h("button", { class: "btn link", onclick: () => close() }, "Cancel"));
+  date.focus();
 }
 
-// ---------- dates ----------
-function datesView() {
-  const list = h("div", { id: "datesList" }, h("p", { class: "muted" }, "Loading…"));
+async function saveVisit(purpose, start, note) {
+  const current = S.couple?.nextMeetupDate ?? null;
+  const visit = await S.api.addVisit(S.coupleId, { start, note });
+  let visits = await S.api.fetchVisits(S.coupleId);
+  if (purpose === "leaving") {
+    await S.api.setStatus(S.coupleId, "apart", nextUpcoming(visits)?.start ?? visit.start);
+  } else {
+    if (purpose === "change" && current) {
+      // Replace the visit the countdown pointed at (if it was one).
+      const replaced = visits.find((v) => v.id !== visit.id && Math.abs(v.start - current) < 1000);
+      if (replaced) {
+        await S.api.deleteVisit(S.coupleId, replaced.id);
+        visits = visits.filter((v) => v.id !== replaced.id);
+      }
+    }
+    const resolved = resolvedNextMeetup(purpose === "change" ? null : current, visits);
+    if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) await S.api.setNextMeetupDate(S.coupleId, resolved);
+  }
+  await loadPlan();
+}
+
+async function deleteVisit(visit) {
+  if (!confirm("Delete this visit?")) return;
+  try {
+    await S.api.deleteVisit(S.coupleId, visit.id);
+    const visits = S.plan.visits.filter((v) => v.id !== visit.id);
+    const current = S.couple?.nextMeetupDate ?? null;
+    const resolved = resolvedNextMeetup(current, visits, visit);
+    if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) await S.api.setNextMeetupDate(S.coupleId, resolved);
+  } catch (e) {
+    console.error("deleteVisit failed", e);
+    alert("Couldn't delete — check your connection and try again.");
+  }
+  await loadPlan();
+}
+
+function openImportantDateModal(initialDay = null) {
   const label = h("input", { type: "text", id: "dateLabelInput", placeholder: "Label (e.g. Anniversary)", maxlength: "60" });
-  const date = h("input", { type: "date", id: "importantDateInput", value: isoDate(0) });
+  const date = h("input", { type: "date", id: "importantDateInput", value: localISODate(initialDay ?? new Date()) });
   const repeats = h("input", { type: "checkbox", id: "repeatsAnnuallyInput", checked: true });
   const error = h("p", { class: "error", hidden: true });
   const save = h("button", { class: "btn primary", id: "saveImportantDateButton", disabled: true, onclick: async () => {
     if (!label.value.trim() || !date.value) return;
-    const [y, m, d] = date.value.split("-").map(Number);
     save.disabled = true;
     error.hidden = true;
     try {
-      await S.api.addImportantDate(S.coupleId, { label: label.value.trim(), date: new Date(y, m - 1, d), repeatsAnnually: repeats.checked });
-      label.value = "";
-      await loadDates(list);
+      await S.api.addImportantDate(S.coupleId, { label: label.value.trim(), day: parseLocalISODate(date.value), repeatsAnnually: repeats.checked });
+      close();
+      await loadPlan();
     } catch (e) {
       console.error("addImportantDate failed", e);
       error.textContent = "Couldn't save — check your connection and try again.";
       error.hidden = false;
+      save.disabled = false;
     }
-    save.disabled = !label.value.trim();
-  } }, "Add date");
+  } }, "Save");
   label.addEventListener("input", () => { save.disabled = !label.value.trim(); });
-  loadDates(list);
-  return h("div", {},
-    h("div", { class: "card" }, h("h2", {}, "📅 Important dates"), list),
-    h("div", { class: "card stack" },
-      h("h2", {}, "Add one"),
-      label,
-      h("label", { class: "field" }, "Date", date),
-      h("label", { class: "check" }, repeats, "Repeats every year"),
-      error, save));
+  const close = openModal("Add an important date 🎁", "Add an important date",
+    label,
+    h("label", { class: "field" }, "Date", date),
+    h("label", { class: "check" }, repeats, "Repeats every year"),
+    error, save,
+    h("button", { class: "btn link", onclick: () => close() }, "Cancel"));
+  label.focus();
 }
 
-async function loadDates(list) {
+async function deleteImportantDate(item) {
+  if (!confirm(`Delete “${item.label}”?`)) return;
   try {
-    const dates = (await S.api.fetchImportantDates(S.coupleId))
-      .map((d) => ({ ...d, next: nextOccurrence(d.date, d.repeatsAnnually) }))
-      .sort((a, b) => a.next - b.next);
-    if (!list.isConnected) return;
-    if (!dates.length) {
-      list.replaceChildren(h("p", { class: "muted", id: "noDatesText" }, "No important dates yet — add your anniversary or another date worth counting down to."));
-      return;
-    }
-    list.replaceChildren(h("ul", { class: "list" }, dates.map((d) => {
-      const n = daysUntil(d.next);
-      const until = n === 0 ? "Today 🎉" : n > 0 ? `${n} day${n === 1 ? "" : "s"}` : `${-n} day${n === -1 ? "" : "s"} ago`;
-      return h("li", { "data-label": d.label },
-        h("div", {}, h("div", {}, `${d.repeatsAnnually ? "🎁" : "⭐"} ${d.label}`),
-          h("div", { class: "when" }, d.next.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }))),
-        h("span", { class: "until" }, until));
-    })));
+    await S.api.deleteImportantDate(S.coupleId, item.id);
   } catch (e) {
-    console.error("fetchImportantDates failed", e);
-    if (list.isConnected) list.replaceChildren(h("p", { class: "error" }, "Couldn't load — switch tabs to try again."));
+    console.error("deleteImportantDate failed", e);
+    alert("Couldn't delete — check your connection and try again.");
   }
+  await loadPlan();
+}
+
+// ---------- plan: agenda + calendar ----------
+
+/** Upcoming visits and dates (soonest first), and past ones (most recent first). */
+function agenda(now = new Date()) {
+  const visits = S.plan.visits.map((v) => ({ kind: "visit", item: v, when: v.start }));
+  const dates = S.plan.dates.map((d) => ({ kind: "date", item: d, when: nextOccurrence(d.date, d.repeatsAnnually, now) }));
+  const all = [...visits, ...dates];
+  const isUpcoming = (e) => (e.kind === "visit" ? e.when > now : daysUntil(e.when, now) >= 0);
+  return {
+    upcoming: all.filter(isUpcoming).sort((a, b) => a.when - b.when),
+    // Past one-off dates used to sort *above* upcoming ones.
+    past: all.filter((e) => !isUpcoming(e)).sort((a, b) => b.when - a.when).slice(0, 10),
+  };
+}
+
+function agendaRow(entry) {
+  const n = daysUntil(entry.when);
+  if (entry.kind === "visit") {
+    const v = entry.item;
+    return h("li", { class: "visit", "data-visit": v.id },
+      h("div", {}, h("div", {}, `✈️ ${v.note || "Visit"}`), h("div", { class: "when" }, formatWhen(v.start))),
+      h("div", { class: "row" }, h("span", { class: "until" }, relativeDayLabel(n)),
+        h("button", { class: "icon-btn", "aria-label": "Delete visit", onclick: () => deleteVisit(v) }, "×")));
+  }
+  const d = entry.item;
+  return h("li", { "data-label": d.label },
+    h("div", {}, h("div", {}, `${d.repeatsAnnually ? "🎁" : "⭐"} ${d.label}`),
+      h("div", { class: "when" }, entry.when.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }))),
+    h("div", { class: "row" }, h("span", { class: "until" }, relativeDayLabel(n)),
+      h("button", { class: "icon-btn", "aria-label": `Delete ${d.label}`, onclick: () => deleteImportantDate(d) }, "×")));
+}
+
+function comingUpCard({ limit = Infinity } = {}) {
+  const { upcoming } = agenda();
+  let body;
+  if (!S.plan.loaded) body = h("p", { class: "muted" }, "Loading…");
+  else if (S.plan.error) body = h("p", { class: "error" }, S.plan.error);
+  else if (!upcoming.length) body = h("p", { class: "muted", id: "noDatesText" }, "Nothing yet — plan your next visit, or add your anniversary.");
+  else body = h("ul", { class: "list", id: "comingUpList" }, upcoming.slice(0, limit).map(agendaRow));
+  return h("div", { class: "card", id: "comingUpCard" },
+    h("div", { class: "row spread" }, h("h2", {}, "📅 Coming up"),
+      limit !== Infinity ? h("button", { class: "btn link", onclick: () => { S.tab = "calendar"; renderShell(); loadPlan(); } }, "Calendar →") : null),
+    body);
+}
+
+function calendarView() {
+  const now = new Date();
+  const month = S.calMonth ?? { y: now.getFullYear(), m: now.getMonth() };
+  const cells = monthCells(month.y, month.m);
+  const visitDays = new Set(S.plan.visits.map((v) => localISODate(v.start)));
+  const importantOn = (d, year) => (d.repeatsAnnually || d.date.getFullYear() === year ? localISODate(new Date(year, d.date.getMonth(), d.date.getDate())) : null);
+  const dateDays = new Set(S.plan.dates.map((d) => importantOn(d, month.y)).filter(Boolean));
+  const todayKey = localISODate(now);
+
+  const shiftMonth = (delta) => {
+    const d = new Date(month.y, month.m + delta, 1);
+    S.calMonth = { y: d.getFullYear(), m: d.getMonth() };
+    renderTab();
+  };
+  const header = h("div", { class: "row spread cal-header" },
+    h("button", { class: "icon-btn", "aria-label": "Previous month", id: "previousMonthButton", onclick: () => shiftMonth(-1) }, "‹"),
+    h("h2", { id: "calendarMonthTitle" }, new Date(month.y, month.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" })),
+    h("button", { class: "icon-btn", "aria-label": "Next month", id: "nextMonthButton", onclick: () => shiftMonth(1) }, "›"));
+  const weekdays = ["S", "M", "T", "W", "T", "F", "S"].map((w) => h("div", { class: "cal-weekday" }, w));
+  const days = cells.map((day) => {
+    if (!day) return h("div", { class: "cal-cell empty" });
+    const key = localISODate(day);
+    const marks = [visitDays.has(key) ? "visit planned" : null, dateDays.has(key) ? "important date" : null].filter(Boolean);
+    return h("button", {
+      class: `cal-cell${key === todayKey ? " today" : ""}${S.calSelected === key ? " selected" : ""}`,
+      id: `calendarDay_${key}`,
+      "aria-label": [day.toLocaleDateString(undefined, { month: "long", day: "numeric" }), key === todayKey ? "today" : null, ...marks].filter(Boolean).join(", "),
+      "aria-pressed": String(S.calSelected === key),
+      onclick: () => { S.calSelected = S.calSelected === key ? null : key; renderTab(); },
+    }, h("span", {}, String(day.getDate())),
+      h("span", { class: "dots" }, visitDays.has(key) ? h("i", { class: "dot-visit" }) : null, dateDays.has(key) ? h("i", { class: "dot-date" }) : null));
+  });
+  const grid = h("div", { class: "card" }, header, h("div", { class: "cal-grid" }, weekdays, days),
+    h("p", { class: "muted small legend" }, h("i", { class: "dot-visit" }), " visit  ", h("i", { class: "dot-date" }), " important date"));
+
+  const selected = S.calSelected ? parseLocalISODate(S.calSelected) : null;
+  const selectedFuture = selected && selected >= new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const actions = h("div", { class: "row" },
+    h("button", { class: "btn primary", id: "planVisitFromCalendarButton", onclick: () => {
+      let initial = null;
+      if (selectedFuture) { initial = new Date(selected); initial.setHours(18, 0, 0, 0); if (initial <= now) initial = null; }
+      openVisitModal("calendar", initial);
+    } }, "✈️ Plan a visit"),
+    h("button", { class: "btn", id: "addImportantDateButton", onclick: () => openImportantDateModal(selected) }, "🎁 Add a date"));
+
+  const side = [];
+  if (selected) {
+    const onDay = [...agenda().upcoming, ...agenda().past].filter((e) =>
+      (e.kind === "visit" ? localISODate(e.item.start) : importantOn(e.item, selected.getFullYear())) === S.calSelected);
+    side.push(h("div", { class: "card" }, h("h2", {}, selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })),
+      onDay.length ? h("ul", { class: "list" }, onDay.map(agendaRow)) : h("p", { class: "muted" }, "Nothing planned")));
+  }
+  side.push(comingUpCard());
+  const { past } = agenda();
+  if (past.length) {
+    side.push(h("details", { class: "card-details" }, h("summary", {}, `Past (${past.length})`), h("ul", { class: "list" }, past.map(agendaRow))));
+  }
+  return h("div", { class: "columns" },
+    h("div", { class: "col-main" }, grid, actions),
+    h("div", { class: "col-side" }, side));
 }
 
 // ---------- stats ----------
@@ -725,7 +947,9 @@ function waitingCard() {
       await S.api.cancelPairing(S.coupleId);
     } catch (e) {
       console.error("cancelPairing failed", e);
-      error.textContent = friendly(e, "Couldn't cancel — try again.");
+      // The rules refuse to cancel once the partner has joined, so that's the
+      // likely reason.
+      error.textContent = friendly(e, "Couldn't cancel — your partner may have just joined. If not, try again.");
       error.hidden = false;
       cancel.disabled = false;
     }

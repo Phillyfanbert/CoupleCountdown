@@ -100,28 +100,42 @@ final class FirestoreService {
         ])
     }
 
-    /// Joins an existing couple doc. Deliberately TWO separate writes:
-    /// firebase/firestore.rules' join path only allows a write that
-    /// touches *exactly* participantUIDs (verified in
-    /// firebase/test/rules.test.js's "join while open" tests — a write
-    /// that also sets other fields is rejected). Setting the profile and
-    /// clearing codeExpiresAt has to happen in a second write, made as an
-    /// established participant under the rules' "existing participant
-    /// editing anything except participantUIDs" branch.
+    /// Joins an existing couple doc. Two writes, because the rules' join
+    /// path only allows a couple-doc write that touches *exactly*
+    /// participantUIDs (firebase/test/rules.test.js "join while open").
+    ///
+    /// The account record is written in the *first* batch, alongside the
+    /// join itself (a different document, so the join rule still holds).
+    /// It used to be in the second: if that one failed, the joiner was in
+    /// the pairing but their account never knew — and retrying Join was
+    /// refused because they were already a participant, so they were stuck
+    /// for good. Now the second write only adds the name/time zone and
+    /// clears codeExpiresAt; if it fails, `ensurePartnerProfile` fills the
+    /// profile in the next time the countdown loads.
     func joinCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
+        let join = db.batch()
+        join.updateData(["participantUIDs": FieldValue.arrayUnion([uid])], forDocument: coupleRef(coupleId))
+        join.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
+        try await join.commit()
+
         try await coupleRef(coupleId).updateData([
-            "participantUIDs": FieldValue.arrayUnion([uid]),
-        ])
-        let batch = db.batch()
-        batch.updateData([
             "partnerProfiles.\(uid)": [
                 "displayName": displayName,
                 "timeZoneIdentifier": timeZoneIdentifier,
             ],
             "codeExpiresAt": FieldValue.delete(),
-        ], forDocument: coupleRef(coupleId))
-        batch.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
-        try await batch.commit()
+        ])
+    }
+
+    /// Fills in this person's name/time zone on the couple doc if it's
+    /// missing (a join whose second write failed).
+    func ensurePartnerProfile(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
+        try await coupleRef(coupleId).updateData([
+            "partnerProfiles.\(uid)": [
+                "displayName": displayName,
+                "timeZoneIdentifier": timeZoneIdentifier,
+            ],
+        ])
     }
 
     /// Cancels a pairing nobody has joined yet (e.g. both partners tapped
@@ -192,7 +206,48 @@ final class FirestoreService {
         try await batch.commit()
     }
 
+    /// Sets (or, with nil, clears) the meetup the main countdown and the
+    /// widget count down to, without changing the apart/together status —
+    /// used when visits are planned or removed.
+    func setNextMeetupDate(_ date: Date?, coupleId: String, uid: String) async throws {
+        try await coupleRef(coupleId).updateData([
+            "nextMeetupDate": date.map { Timestamp(date: $0) as Any } ?? FieldValue.delete(),
+            "lastUpdatedBy": uid,
+            "lastUpdatedAt": FieldValue.serverTimestamp(),
+        ])
+    }
+
+    // MARK: - Visits (planned meetups)
+
+    func addVisit(_ visit: Visit, coupleId: String) async throws {
+        var fields: [String: Any] = [
+            "start": Timestamp(date: visit.start),
+            "createdBy": visit.createdBy,
+        ]
+        if let note = visit.note, !note.isEmpty { fields["note"] = note }
+        try await coupleRef(coupleId).collection("visits").document(visit.id).setData(fields)
+    }
+
+    func fetchVisits(coupleId: String) async throws -> [Visit] {
+        let snapshot = try await coupleRef(coupleId).collection("visits").getDocuments()
+        return snapshot.documents.compactMap { doc in
+            guard
+                let start = doc.get("start") as? Timestamp,
+                let createdBy = doc.get("createdBy") as? String
+            else { return nil }
+            return Visit(id: doc.documentID, start: start.dateValue(), note: doc.get("note") as? String, createdBy: createdBy)
+        }
+    }
+
+    func deleteVisit(id: String, coupleId: String) async throws {
+        try await coupleRef(coupleId).collection("visits").document(id).delete()
+    }
+
     // MARK: - Important dates (§7.4)
+
+    func deleteImportantDate(id: String, coupleId: String) async throws {
+        try await coupleRef(coupleId).collection("importantDates").document(id).delete()
+    }
 
     func addImportantDate(_ date: ImportantDate, coupleId: String) async throws {
         try await coupleRef(coupleId).collection("importantDates").document(date.id).setData([

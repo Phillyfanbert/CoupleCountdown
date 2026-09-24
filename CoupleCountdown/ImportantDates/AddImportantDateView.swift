@@ -56,8 +56,11 @@ struct AddImportantDateView: View {
         // machine (§7.4).
         let newDate = ImportantDate(
             id: UUID().uuidString,
-            label: label,
-            date: date,
+            label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+            // The picked *day*, stored so it reads as the same day for a
+            // partner in another time zone (see CalendarDay). Storing the
+            // picker's instant showed it a day early to anyone further west.
+            date: CalendarDay(localDate: date).storedDate,
             repeatsAnnually: repeatsAnnually,
             createdBy: uid
         )

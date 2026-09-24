@@ -25,8 +25,8 @@ architecture, decisions, and rationale live in [`DESIGN.md`](DESIGN.md).
 **On the web — any phone, tablet, or computer, nothing to install:**
 **<https://couplecountdown-7715c.web.app>**. On a phone, use Share → *Add to
 Home Screen* for an app-style icon. The web version has the full core
-experience (pairing, live countdown, apart/together, important dates, stats,
-"thinking of you", themes) and syncs with the iPhone app through the same
+experience (pairing, live countdown, apart/together, the calendar of visits
+and important dates, stats, "thinking of you", themes) and syncs with the iPhone app through the same
 backend and join codes — but, as a website, it can't provide a Home Screen
 or Lock Screen widget.
 
@@ -71,7 +71,9 @@ below.
   stats (total days together vs. apart)
 - A "thinking of you" one-tap nudge
 - Milestone celebrations (countdown hitting zero, round-number day counts)
-- Separate countdown types for anniversaries and other important dates
+- A shared calendar: plan any number of visits (date and time — the main
+  countdown and widget follow the next one), keep anniversaries and other
+  important dates, see them on a month grid with "in N days" countdowns
 - Each partner's current local time/time zone shown alongside the countdown
 
 ## Notable engineering decisions

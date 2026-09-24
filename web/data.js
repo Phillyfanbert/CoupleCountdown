@@ -10,6 +10,7 @@ import {
   arrayUnion,
   addDoc,
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -19,6 +20,7 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
+import { dayFromStored, normalizedStart, storedFromLocalDay } from "./logic.js";
 
 const PING_LIFETIME_MS = 5 * 86_400_000;
 const CODE_LIFETIME_MS = 48 * 3_600_000;
@@ -74,18 +76,32 @@ export function makeApi(db, uid) {
     },
 
     /**
-     * Joins an existing couple. Deliberately two writes — the rules' join path
-     * only permits a write that touches exactly participantUIDs.
+     * Joins an existing couple. Two writes, because the rules' join path only
+     * permits a couple-doc write that touches exactly participantUIDs.
+     *
+     * The account record goes in the *first* batch, with the join itself (a
+     * different document, so the join rule still holds). It used to be in the
+     * second: if that failed, the joiner was in the pairing but their account
+     * never knew, and retrying Join was refused (already a participant) — stuck
+     * for good. Now a failed second write only leaves the name missing, which
+     * ensurePartnerProfile fills in the next time the countdown loads.
      */
     async joinCouple(coupleId, displayName, timeZone) {
-      await updateDoc(coupleRef(coupleId), { participantUIDs: arrayUnion(uid) });
-      const batch = writeBatch(db);
-      batch.update(coupleRef(coupleId), {
+      const join = writeBatch(db);
+      join.update(coupleRef(coupleId), { participantUIDs: arrayUnion(uid) });
+      join.set(userRef(), { displayName, coupleId }, { merge: true });
+      await join.commit();
+      await updateDoc(coupleRef(coupleId), {
         [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
         codeExpiresAt: deleteField(),
       });
-      batch.set(userRef(), { displayName, coupleId }, { merge: true });
-      await batch.commit();
+    },
+
+    /** Fills in this person's name/time zone on the couple doc if it's missing. */
+    async ensurePartnerProfile(coupleId, displayName, timeZone) {
+      await updateDoc(coupleRef(coupleId), {
+        [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
+      });
     },
 
     /**
@@ -123,15 +139,56 @@ export function makeApi(db, uid) {
       await batch.commit();
     },
 
-    async addImportantDate(coupleId, { label, date, repeatsAnnually }) {
+    /** Sets (or, with null, clears) what the countdown follows, without changing status. */
+    async setNextMeetupDate(coupleId, date) {
+      await updateDoc(coupleRef(coupleId), {
+        nextMeetupDate: date ? Timestamp.fromDate(date) : deleteField(),
+        lastUpdatedBy: uid,
+        lastUpdatedAt: serverTimestamp(),
+      });
+    },
+
+    // ---------- visits (planned meetups, with a time) ----------
+
+    async addVisit(coupleId, { start, note }) {
+      const visit = { id: globalThis.crypto.randomUUID(), start: normalizedStart(start), note: note || null, createdBy: uid };
+      const fields = { start: Timestamp.fromDate(visit.start), createdBy: uid };
+      if (visit.note) fields.note = visit.note;
+      await setDoc(doc(collection(coupleRef(coupleId), "visits"), visit.id), fields);
+      return visit;
+    },
+
+    async fetchVisits(coupleId) {
+      const snap = await getDocs(collection(coupleRef(coupleId), "visits"));
+      return snap.docs
+        .map((d) => {
+          const data = d.data();
+          if (!data.start?.toDate) return null;
+          return { id: d.id, start: data.start.toDate(), note: typeof data.note === "string" ? data.note : null, createdBy: data.createdBy };
+        })
+        .filter(Boolean);
+    },
+
+    async deleteVisit(coupleId, id) {
+      await deleteDoc(doc(collection(coupleRef(coupleId), "visits"), id));
+    },
+
+    // ---------- important dates (calendar days) ----------
+
+    /** `day` is any Date on the picked day (local); stored so it's the same day in every zone. */
+    async addImportantDate(coupleId, { label, day, repeatsAnnually }) {
       const id = globalThis.crypto.randomUUID();
       await setDoc(doc(collection(coupleRef(coupleId), "importantDates"), id), {
         label,
-        date: Timestamp.fromDate(date),
+        date: Timestamp.fromDate(storedFromLocalDay(day)),
         repeatsAnnually,
         createdBy: uid,
       });
       return id;
+    },
+
+    async deleteImportantDate(coupleId, id) {
+      await deleteDoc(doc(collection(coupleRef(coupleId), "importantDates"), id));
     },
 
     async fetchImportantDates(coupleId) {
@@ -143,7 +200,9 @@ export function makeApi(db, uid) {
           return {
             id: d.id,
             label: data.label,
-            date: data.date.toDate(),
+            // Local midnight of the stored *day* — read with UTC components,
+            // not as an instant (see storedFromLocalDay).
+            date: dayFromStored(data.date.toDate()),
             repeatsAnnually: data.repeatsAnnually === true,
             createdBy: data.createdBy,
           };
