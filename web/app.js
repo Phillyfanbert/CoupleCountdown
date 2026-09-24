@@ -1,10 +1,20 @@
 // app.js — CoupleCountdown web client. Same Firebase project, data model, and
 // Security Rules as the iPhone app, so a partner on the web and a partner on an
-// iPhone share one countdown. Feature set: pairing, live countdown, apart/together
-// toggle, important dates, stats, thinking-of-you, themes.
+// iPhone share one countdown. Identity is an email + password account, so one
+// person can be signed in on their phone and their computer at the same time;
+// the pairing lives on the account (users/{uid}), not on any one device.
 
 import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  getAuth,
+  linkWithCredential,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
 import { getFirestore, onSnapshot } from "firebase/firestore";
 import { firebaseConfig } from "./firebase-config.js";
 import { makeApi, generateJoinCode, normalizeCode } from "./data.js";
@@ -24,11 +34,17 @@ const $app = document.getElementById("app");
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 // localStorage can throw (private mode, blocked storage) — the app must still run.
+// Only device preferences live here now (theme); identity and pairing are on the account.
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* per-session only */ } },
   del: (k) => { try { localStorage.removeItem(k); } catch { /* nothing to do */ } },
 };
+
+// Before accounts existed, this browser kept an anonymous identity plus its
+// pairing and name here. Creating an account upgrades that identity in place
+// (same uid), so an existing pairing carries over instead of being lost.
+const legacy = { coupleId: store.get("coupleId"), name: store.get("displayName") };
 
 const THEMES = [
   { id: "blush", name: "Blush", emoji: "💗", color: "#ff6f91" },
@@ -37,18 +53,22 @@ const THEMES = [
 ];
 
 const S = {
-  uid: null,
+  user: null, // signed-in account (never an anonymous user)
   api: null,
-  name: store.get("displayName") || "",
-  coupleId: store.get("coupleId") || "",
+  profile: null, // users/{uid} once loaded
+  name: "",
+  coupleId: "",
   prefillCode: normalizeCode(new URLSearchParams(location.search).get("join") || ""),
-  step: "name", // onboarding: name | choice | create | join
+  authMode: "signup", // signup | signin
+  authBusy: false, // suppresses the auth listener while a sign-in/up finishes its own writes
+  screen: "loading", // loading | auth | onboarding | main
+  step: "choice", // onboarding: name | choice | create | join
   tab: "home",
   couple: null,
   loadError: null,
-  unsub: null,
+  unsubProfile: null,
+  unsubCouple: null,
   busy: false,
-  newCode: null,
   creating: false,
   createError: null,
 };
@@ -81,6 +101,17 @@ function friendly(e, fallback) {
   return fallback || e?.message || "Something went wrong.";
 }
 
+function authMessage(e) {
+  const code = e?.code || "";
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login-credentials/.test(code)) return "Email or password is incorrect.";
+  if (/email-already-in-use|credential-already-in-use/.test(code)) return "There's already an account with that email — sign in instead.";
+  if (code.includes("invalid-email")) return "That doesn't look like an email address.";
+  if (code.includes("weak-password") || code.includes("missing-password")) return "Use at least 6 characters for your password.";
+  if (code.includes("too-many-requests")) return "Too many attempts — wait a minute and try again.";
+  if (code.includes("network")) return "Can't reach the server — check your connection and try again.";
+  return "Couldn't sign in — try again.";
+}
+
 /** Local-calendar YYYY-MM-DD, `n` days from today (toISOString would use UTC and can be a day off). */
 function isoDate(n = 0) {
   const d = new Date(Date.now() + n * 86_400_000);
@@ -94,80 +125,232 @@ function applyTheme(id) {
   store.set("theme", theme.id);
 }
 
-// ---------- boot ----------
-function ensureUser() {
-  return new Promise((resolve, reject) => {
-    const off = onAuthStateChanged(
-      auth,
-      async (user) => {
-        off();
-        if (user) return resolve(user);
-        try {
-          resolve((await signInAnonymously(auth)).user);
-        } catch (e) {
-          reject(e);
-        }
-      },
-      reject,
-    );
-  });
-}
-
-async function boot() {
-  applyTheme(store.get("theme") || "blush");
-  try {
-    const user = await ensureUser();
-    S.uid = user.uid;
-    S.api = makeApi(db, user.uid);
-  } catch (e) {
-    console.error("Sign-in failed", e);
-    mount(
-      h("div", { class: "center" }, h("div", { class: "stack" },
-        h("h2", {}, "Couldn't sign in"),
-        h("p", { class: "muted" }, friendly(e, "Check your connection and try again.")),
-        h("button", { class: "btn primary", onclick: () => location.reload() }, "Try again"),
-      )),
-    );
-    return;
-  }
-  if (S.coupleId) enterMain();
-  else {
-    S.step = S.name ? (S.prefillCode ? "join" : "choice") : "name";
-    renderOnboarding();
-  }
-}
-
-// ---------- onboarding ----------
-function renderOnboarding() {
-  const views = { name: nameView, choice: choiceView, create: createView, join: joinView };
-  mount(h("div", { class: "stack" }, headerTop(), views[S.step]()));
-}
-
 function headerTop() {
   return h("header", { class: "top" }, h("h1", {}, "💕 CoupleCountdown"));
 }
 
-function nameView() {
-  const input = h("input", { type: "text", id: "nameInput", placeholder: "Your name", autocomplete: "given-name", maxlength: "30", value: S.name });
-  const go = h("button", { class: "btn primary", id: "continueButton", disabled: !S.name.trim(), onclick: () => {
-    S.name = input.value.trim();
-    store.set("displayName", S.name);
-    S.step = S.prefillCode ? "join" : "choice";
+function loadingScreen(text) {
+  S.screen = "loading";
+  mount(headerTop(), h("div", { class: "center" }, h("p", { class: "muted" }, text)));
+}
+
+// ---------- session ----------
+function boot() {
+  applyTheme(store.get("theme") || "blush");
+  loadingScreen("Loading…");
+  onAuthStateChanged(auth, (user) => {
+    if (!S.authBusy) startSession(user);
+  });
+}
+
+function endSession() {
+  S.unsubProfile?.();
+  S.unsubCouple?.();
+  Object.assign(S, { unsubProfile: null, unsubCouple: null, user: null, api: null, profile: null, name: "", coupleId: "", couple: null, loadError: null });
+}
+
+function startSession(user) {
+  if (user && !user.isAnonymous && S.user?.uid === user.uid) return; // already running
+  endSession();
+  if (!user || user.isAnonymous) {
+    renderAuth();
+    return;
+  }
+  S.user = user;
+  S.api = makeApi(db, user.uid);
+  S.step = S.prefillCode ? "join" : "choice";
+  loadingScreen("Loading your account…");
+  // includeMetadataChanges so onProfile also hears when a local write is
+  // confirmed by the server (see the pending-writes check in onProfile).
+  S.unsubProfile = onSnapshot(S.api.userRef(), { includeMetadataChanges: true }, onProfile, (e) => {
+    console.error("Profile listener failed", e);
+    mount(headerTop(), h("div", { class: "card stack" },
+      h("h2", {}, "Couldn't load your account"),
+      h("p", { class: "muted" }, friendly(e, "Try again in a moment.")),
+      h("button", { class: "btn primary", onclick: () => location.reload() }, "Try again"),
+      signOutButton()));
+  });
+}
+
+/**
+ * Every device signed in to the same account watches users/{uid}, so pairing
+ * (or cancelling) on one device moves all the others along with it.
+ */
+function onProfile(snap) {
+  // Act only on server-confirmed state. Firestore reports this device's own
+  // writes immediately, before the server has them — after "Create", that
+  // meant opening the new pairing before the server had stored it; the rules
+  // deny reading a pairing that doesn't exist yet, and a denied listener
+  // never recovers, so the screen was stuck on "can't open that pairing".
+  if (snap.metadata.hasPendingWrites) return;
+  // Offline with nothing cached: we don't know the account's state yet.
+  if (snap.metadata.fromCache && !snap.exists()) return;
+  const p = snap.data() || {};
+  S.profile = p;
+  S.name = p.displayName || "";
+  if (p.coupleId) {
+    if (p.coupleId !== S.coupleId || S.screen !== "main") {
+      S.coupleId = p.coupleId;
+      enterMain();
+    }
+    return;
+  }
+  S.coupleId = "";
+  S.unsubCouple?.();
+  S.unsubCouple = null;
+  S.couple = null;
+  let step = S.step;
+  if (!S.name) step = "name";
+  else if (step === "name" || S.screen === "main") step = S.prefillCode ? "join" : "choice";
+  if (step !== S.step || S.screen !== "onboarding") {
+    S.step = step;
     renderOnboarding();
+  }
+}
+
+// ---------- sign in / create account ----------
+function renderAuth() {
+  S.screen = "auth";
+  const signup = S.authMode === "signup";
+  const upgrading = auth.currentUser?.isAnonymous && legacy.coupleId;
+
+  const name = signup ? h("input", { type: "text", id: "authNameInput", placeholder: "Your name (what your partner sees)", autocomplete: "given-name", maxlength: "30", value: legacy.name || "" }) : null;
+  const email = h("input", { type: "email", id: "authEmailInput", placeholder: "Email", autocomplete: "email", autocapitalize: "off", spellcheck: "false" });
+  const password = h("input", { type: "password", id: "authPasswordInput", placeholder: signup ? "Password (6+ characters)" : "Password", autocomplete: signup ? "new-password" : "current-password" });
+  const error = h("p", { class: "error", id: "authError", hidden: true });
+  const note = h("p", { class: "muted small", id: "authNote", hidden: true });
+
+  const submit = h("button", { class: "btn primary", id: "authSubmitButton", type: "submit" }, signup ? "Create account" : "Sign in");
+  const form = h("form", { class: "stack", onsubmit: (e) => {
+    e.preventDefault();
+    submitAuth({ name: name?.value.trim(), email: email.value.trim(), password: password.value }, error, submit);
+  } }, name, email, password, error, submit);
+
+  const forgot = signup ? null : h("button", { class: "btn link", type: "button", id: "forgotPasswordButton", onclick: async () => {
+    error.hidden = true;
+    if (!email.value.trim()) {
+      error.textContent = "Enter your email above first.";
+      error.hidden = false;
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email.value.trim());
+      // Worded the same whether or not the account exists, so this can't be
+      // used to check which emails have accounts.
+      note.textContent = "If there's an account for that email, a reset link is on its way.";
+      note.hidden = false;
+    } catch (e) {
+      error.textContent = authMessage(e);
+      error.hidden = false;
+    }
+  } }, "Forgot password?");
+
+  const toggle = h("button", { class: "btn link", type: "button", id: "authToggleButton", onclick: () => {
+    S.authMode = signup ? "signin" : "signup";
+    renderAuth();
+  } }, signup ? "Already have an account? Sign in" : "New here? Create an account");
+
+  mount(h("div", { class: "stack" }, headerTop(),
+    h("div", { class: "card stack" },
+      h("h2", {}, signup ? "Create your account" : "Welcome back"),
+      h("p", { class: "muted small" }, upgrading
+        ? "Create an account to keep the pairing on this browser — then sign in with it on your phone and computer."
+        : "Use the same account on your phone, your computer, and the iPhone app — you'll see the same countdown everywhere."),
+      form, note,
+      h("div", { class: "row spread" }, toggle, forgot))));
+  (signup ? name : email).focus();
+}
+
+async function submitAuth({ name, email, password }, error, button) {
+  if (S.authMode === "signup" && !name) {
+    error.textContent = "Add the name your partner will see.";
+    error.hidden = false;
+    return;
+  }
+  S.authBusy = true;
+  button.disabled = true;
+  error.hidden = true;
+  try {
+    let user;
+    if (S.authMode === "signup") {
+      const current = auth.currentUser;
+      // Captured before linking: Firebase mutates the user object in place,
+      // so current.isAnonymous reads false once the link succeeds.
+      const wasAnonymous = !!current?.isAnonymous;
+      if (wasAnonymous) {
+        // Upgrade in place: same uid, so a pre-accounts pairing carries over.
+        user = (await linkWithCredential(current, EmailAuthProvider.credential(email, password))).user;
+      } else {
+        user = (await createUserWithEmailAndPassword(auth, email, password)).user;
+      }
+      const profile = { displayName: name };
+      if (wasAnonymous && legacy.coupleId) profile.coupleId = legacy.coupleId;
+      await makeApi(db, user.uid).saveProfile(profile);
+      // Consumed: the next person to use this browser shouldn't see it.
+      store.del("coupleId");
+      store.del("displayName");
+      legacy.coupleId = null;
+      legacy.name = null;
+    } else {
+      user = (await signInWithEmailAndPassword(auth, email, password)).user;
+    }
+    S.authBusy = false;
+    startSession(user);
+  } catch (e) {
+    console.error("Auth failed", e);
+    S.authBusy = false;
+    error.textContent = authMessage(e);
+    error.hidden = false;
+    button.disabled = false;
+  }
+}
+
+function signOutButton() {
+  return h("button", { class: "btn", id: "signOutButton", onclick: async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error("Sign-out failed", e);
+    }
+  } }, "Sign out");
+}
+
+// ---------- onboarding ----------
+function renderOnboarding() {
+  S.screen = "onboarding";
+  const views = { name: nameView, choice: choiceView, create: createView, join: joinView };
+  mount(h("div", { class: "stack" }, headerTop(), views[S.step]()));
+}
+
+function nameView() {
+  const input = h("input", { type: "text", id: "nameInput", placeholder: "Your name", autocomplete: "given-name", maxlength: "30" });
+  const error = h("p", { class: "error", hidden: true });
+  const go = h("button", { class: "btn primary", id: "continueButton", disabled: true, onclick: async () => {
+    go.disabled = true;
+    try {
+      await S.api.saveProfile({ displayName: input.value.trim() });
+    } catch (e) {
+      console.error("saveProfile failed", e);
+      error.textContent = friendly(e, "Couldn't save — try again.");
+      error.hidden = false;
+      go.disabled = false;
+    }
   } }, "Continue");
   input.addEventListener("input", () => { go.disabled = !input.value.trim(); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !go.disabled) go.click(); });
   return h("div", { class: "card stack" },
     h("h2", {}, "What should your partner see your name as?"),
-    input, go);
+    input, error, go);
 }
 
 function choiceView() {
   return h("div", { class: "card stack" },
-    h("h2", {}, "Let's get you two set up"),
-    h("p", { class: "muted" }, "Only one of you should tap Create — have your partner tap Join with the code you'll get next."),
-    h("button", { class: "btn primary", id: "createPairingButton", onclick: () => { S.step = "create"; S.newCode = null; startCreate(); } }, "✨ Create a pairing"),
+    h("h2", {}, `Hi ${S.name} — let's get you two set up`),
+    h("p", { class: "muted" }, "Only one of you should tap Create — have your partner tap Join with the code you'll get next. If you're already paired, sign in with that account instead."),
+    h("button", { class: "btn primary", id: "createPairingButton", onclick: () => startCreate() }, "✨ Create a pairing"),
     h("button", { class: "btn", id: "joinPairingButton", onclick: () => { S.step = "join"; renderOnboarding(); } }, "💌 Join a pairing"),
+    h("p", { class: "muted small" }, `Signed in as ${S.user?.email || ""}`),
+    signOutButton(),
   );
 }
 
@@ -175,41 +358,32 @@ async function startCreate() {
   if (S.creating) return;
   S.creating = true;
   S.createError = null;
-  if (S.step === "create") renderOnboarding();
-  const code = generateJoinCode();
+  S.step = "create";
+  renderOnboarding();
   try {
-    await S.api.createCouple(code, S.name, timeZone());
-    S.newCode = code;
+    // On success the account record gains the coupleId, and every signed-in
+    // device (this one included) moves to the countdown, whose "waiting for
+    // your partner" card shows the code to share.
+    await S.api.createCouple(generateJoinCode(), S.name, timeZone());
   } catch (e) {
     console.error("createCouple failed", e);
     S.createError = friendly(e, "Couldn't create the pairing — try again.");
+    if (S.screen !== "main") {
+      S.step = "create";
+      renderOnboarding();
+    }
   }
   S.creating = false;
-  if (S.step === "create") renderOnboarding();
 }
 
 function createView() {
-  if (S.creating) return h("div", { class: "card center" }, h("p", { class: "muted" }, "Creating…"));
   if (S.createError) {
     return h("div", { class: "card stack" },
       h("p", { class: "error" }, S.createError),
-      h("button", { class: "btn primary", onclick: () => startCreate() }, "Try again"));
+      h("button", { class: "btn primary", onclick: () => startCreate() }, "Try again"),
+      h("button", { class: "btn link", onclick: () => { S.createError = null; S.step = "choice"; renderOnboarding(); } }, "Back"));
   }
-  if (!S.newCode) return h("div", { class: "card center" }, h("p", { class: "muted" }, "Creating…"));
-  // coupleId is only committed when the user taps Continue — advancing on
-  // write success (as the iPhone app once did) hid the code before it could
-  // be read or shared.
-  return h("div", { class: "card stack" },
-    h("h2", {}, "Your code"),
-    h("div", { class: "code", id: "generatedCode" }, S.newCode),
-    shareButtons(S.newCode),
-    h("p", { class: "muted small" }, "Send this to your partner. They tap “Join a pairing” and enter it — on the web or in the iPhone app."),
-    h("button", { class: "btn primary", id: "continueToCountdownButton", onclick: () => {
-      S.coupleId = S.newCode;
-      store.set("coupleId", S.coupleId);
-      enterMain();
-    } }, "Continue"),
-  );
+  return h("div", { class: "card center" }, h("p", { class: "muted" }, "Creating…"));
 }
 
 function shareButtons(code) {
@@ -237,13 +411,12 @@ function joinView() {
     error.hidden = true;
     try {
       await S.api.joinCouple(code, S.name, timeZone());
-      S.coupleId = code;
-      store.set("coupleId", code);
-      enterMain();
+      S.prefillCode = "";
+      // The account record now has the coupleId; its listener takes it from here.
     } catch (e) {
       console.error("joinCouple failed", e);
-      // Deliberately generic: a wrong, already-full, or expired code all fail
-      // the Security Rules identically (permission denied).
+      // Deliberately generic: a wrong, already-full, cancelled, or expired
+      // code all fail the Security Rules identically (permission denied).
       error.textContent = friendly(e, "Couldn't join — check the code and try again.");
       error.hidden = false;
       go.disabled = false;
@@ -263,10 +436,11 @@ const TABS = [
   ["home", "Countdown"],
   ["dates", "Dates"],
   ["stats", "Stats"],
-  ["theme", "Theme"],
+  ["settings", "Settings"],
 ];
 
 function enterMain() {
+  S.screen = "main";
   S.tab = "home";
   S.couple = null;
   S.loadError = null;
@@ -275,8 +449,8 @@ function enterMain() {
 }
 
 function listen() {
-  S.unsub?.();
-  S.unsub = onSnapshot(
+  S.unsubCouple?.();
+  S.unsubCouple = onSnapshot(
     S.api.coupleRef(S.coupleId),
     (snap) => {
       if (!snap.exists()) {
@@ -291,12 +465,12 @@ function listen() {
         };
         S.loadError = null;
       }
-      if (S.tab === "home") renderTab();
+      if (S.tab === "home" || S.tab === "settings") renderTab();
     },
     (err) => {
-      console.error("Listener failed", err);
-      S.loadError = "Can't open this pairing on this device. It may have been created by a different browser — start over to pair again.";
-      if (S.tab === "home") renderTab();
+      console.error("Couple listener failed", err);
+      S.loadError = "This account can't open that pairing. Leave it to create or join a new one.";
+      if (S.tab === "home" || S.tab === "settings") renderTab();
     },
   );
 }
@@ -311,7 +485,7 @@ function renderShell() {
 function renderTab() {
   const content = document.getElementById("content");
   if (!content) return;
-  const views = { home: homeView, dates: datesView, stats: statsView, theme: themeView };
+  const views = { home: homeView, dates: datesView, stats: statsView, settings: settingsView };
   content.replaceChildren(views[S.tab]());
   updateUnits();
 }
@@ -319,7 +493,7 @@ function renderTab() {
 // ---------- home ----------
 function homeView() {
   if (S.loadError) {
-    return h("div", { class: "card stack" }, h("p", { class: "error" }, S.loadError), startOverButton());
+    return h("div", { class: "card stack" }, h("p", { class: "error" }, S.loadError), leavePairingButton());
   }
   const c = S.couple;
   if (!c) return h("div", { class: "card center" }, h("p", { class: "muted" }, "Loading…"));
@@ -327,12 +501,7 @@ function homeView() {
   const together = c.status === "together";
   const parts = [];
 
-  if (c.participantUIDs.length < 2) {
-    parts.push(h("div", { class: "card stack", id: "waitingCard" },
-      h("h2", {}, "Waiting for your partner 💌"),
-      h("div", { class: "code" }, S.coupleId),
-      shareButtons(S.coupleId)));
-  }
+  if (c.participantUIDs.length < 2) parts.push(waitingCard());
 
   parts.push(countdownCard(c));
   parts.push(h("div", { class: "row spread", style: "margin-bottom:16px" },
@@ -529,26 +698,54 @@ function statsView() {
   return h("div", { class: "card" }, h("h2", {}, "💞 Stats"), body);
 }
 
-// ---------- theme / settings ----------
-function themeView() {
+// ---------- settings ----------
+function settingsView() {
   const current = store.get("theme") || "blush";
   const swatches = THEMES.map((t) => h("button", { class: "swatch", id: `theme_${t.id}`, "aria-pressed": String(t.id === current), onclick: () => { applyTheme(t.id); renderTab(); } },
     h("span", { class: "dot", style: `background:${t.color}` }), `${t.emoji} ${t.name}`, t.id === current ? h("span", { style: "margin-left:auto" }, "✓") : null));
+  const partner = S.couple
+    ? Object.entries(S.couple.partnerProfiles).find(([uid]) => uid !== S.user?.uid)?.[1]?.displayName
+    : null;
   return h("div", {},
     h("div", { class: "card stack" }, h("h2", {}, "Theme"), h("p", { class: "muted small" }, "Saved on this device."), h("div", { class: "swatches" }, swatches)),
-    h("div", { class: "card stack" }, h("h2", {}, "This device"),
-      h("p", { class: "muted small" }, `Pairing code ${S.coupleId}. Each browser or phone has its own identity, and a pairing holds exactly two people — so this device can't be a third.`),
-      startOverButton()));
+    h("div", { class: "card stack" }, h("h2", {}, "Account"),
+      h("p", { class: "muted small", id: "accountEmail" }, `Signed in as ${S.user?.email || ""}${S.name ? ` (${S.name})` : ""}.`),
+      h("p", { class: "muted small" }, partner
+        ? `Paired with ${partner}. Sign in with this account on any phone or computer to see the same countdown.`
+        : "Sign in with this account on any phone or computer to see the same countdown."),
+      signOutButton()));
 }
 
-function startOverButton() {
-  return h("button", { class: "btn", id: "startOverButton", onclick: async () => {
-    if (!confirm("Leave this pairing on this device? You'll need a new code to pair again.")) return;
-    S.unsub?.();
-    store.del("coupleId");
-    try { await signOut(auth); } catch { /* reload signs in fresh regardless */ }
-    location.href = location.pathname;
-  } }, "Start over on this device");
+function waitingCard() {
+  const error = h("p", { class: "error", hidden: true });
+  const cancel = h("button", { class: "btn link", id: "cancelPairingButton", onclick: async () => {
+    if (!confirm("Cancel this pairing? Its code will stop working, and you can create a new one or join your partner's.")) return;
+    cancel.disabled = true;
+    try {
+      await S.api.cancelPairing(S.coupleId);
+    } catch (e) {
+      console.error("cancelPairing failed", e);
+      error.textContent = friendly(e, "Couldn't cancel — try again.");
+      error.hidden = false;
+      cancel.disabled = false;
+    }
+  } }, "Both tapped Create? Cancel this one");
+  return h("div", { class: "card stack", id: "waitingCard" },
+    h("h2", {}, "Waiting for your partner 💌"),
+    h("div", { class: "code", id: "generatedCode" }, S.coupleId),
+    shareButtons(S.coupleId),
+    h("p", { class: "muted small" }, "Send this to your partner. They create their own account, tap “Join a pairing”, and enter it — on the web or in the iPhone app."),
+    error, cancel);
+}
+
+function leavePairingButton() {
+  return h("button", { class: "btn", id: "leavePairingButton", onclick: async () => {
+    try {
+      await S.api.forgetPairing();
+    } catch (e) {
+      console.error("forgetPairing failed", e);
+    }
+  } }, "Leave this pairing");
 }
 
 boot();

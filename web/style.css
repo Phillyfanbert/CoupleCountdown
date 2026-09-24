@@ -92,9 +92,10 @@ button.btn, a.btn {
 button.btn.primary { background: var(--accent); color: var(--on-accent); }
 button.btn:disabled { opacity: 0.5; cursor: default; }
 button.btn.link { border: 0; width: auto; padding: 6px 4px; font-size: 0.9rem; color: var(--muted); font-weight: 700; }
+.row.spread:has(> .btn.link) { flex-wrap: wrap; }
 button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, #fff); outline-offset: 2px; }
 
-input[type="text"], input[type="date"] {
+input[type="text"], input[type="email"], input[type="password"], input[type="date"] {
   font: inherit; width: 100%; padding: 13px 14px; border-radius: 14px; color: var(--ink);
   border: 1.5px solid var(--card-border); background: var(--field);
 }

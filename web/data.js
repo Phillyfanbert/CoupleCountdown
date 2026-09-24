@@ -1,6 +1,8 @@
 // data.js — every Firestore read/write the web client makes, mirroring
 // CoupleCountdown/Services/FirestoreService.swift field-for-field so the web
-// app and the iPhone app can share one couple document. Takes a Firestore
+// app and the iPhone app can share one couple document. A person's pairing and
+// name live on their account (users/{uid}), not the device, so every device
+// they sign in on finds the same pairing. Takes a Firestore
 // instance and uid rather than importing a config, so the same module runs in
 // the browser (import map -> gstatic CDN) and in Node (npm `firebase`) for tests.
 
@@ -36,19 +38,34 @@ export function normalizeCode(input) {
 
 export function makeApi(db, uid) {
   const coupleRef = (coupleId) => doc(db, "couples", coupleId);
+  const userRef = () => doc(db, "users", uid);
 
   return {
     coupleRef,
 
-    /** Creates the couple doc with the caller as sole participant (§5.3). */
+    userRef,
+
+    /** Name (and pairing, when known) on the account — merge, never clobber. */
+    async saveProfile(fields) {
+      await setDoc(userRef(), fields, { merge: true });
+    },
+
+    /**
+     * Creates the couple doc with the caller as sole participant (§5.3) and
+     * records it on the account in the same batch, so the pairing can never
+     * exist without the account knowing about it.
+     */
     async createCouple(coupleId, displayName, timeZone) {
-      await setDoc(coupleRef(coupleId), {
+      const batch = writeBatch(db);
+      batch.set(coupleRef(coupleId), {
         status: "apart",
         participantUIDs: [uid],
         partnerProfiles: { [uid]: { displayName, timeZoneIdentifier: timeZone } },
         lastUpdatedBy: uid,
         lastUpdatedAt: Timestamp.now(),
       });
+      batch.set(userRef(), { displayName, coupleId }, { merge: true });
+      await batch.commit();
       // Separate write: the Security Rules' create check is an equality test on
       // participantUIDs, so codeExpiresAt stays out of the create.
       await updateDoc(coupleRef(coupleId), {
@@ -62,10 +79,30 @@ export function makeApi(db, uid) {
      */
     async joinCouple(coupleId, displayName, timeZone) {
       await updateDoc(coupleRef(coupleId), { participantUIDs: arrayUnion(uid) });
-      await updateDoc(coupleRef(coupleId), {
+      const batch = writeBatch(db);
+      batch.update(coupleRef(coupleId), {
         [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
         codeExpiresAt: deleteField(),
       });
+      batch.set(userRef(), { displayName, coupleId }, { merge: true });
+      await batch.commit();
+    },
+
+    /**
+     * Cancels a pairing nobody has joined yet (e.g. both partners tapped
+     * Create). Marks it closed so its code can't be joined any more, and
+     * detaches it from the account so the user can create or join another.
+     */
+    async cancelPairing(coupleId) {
+      const batch = writeBatch(db);
+      batch.update(coupleRef(coupleId), { closed: true });
+      batch.set(userRef(), { coupleId: deleteField() }, { merge: true });
+      await batch.commit();
+    },
+
+    /** Detaches a pairing that no longer exists or can't be read. */
+    async forgetPairing() {
+      await setDoc(userRef(), { coupleId: deleteField() }, { merge: true });
     },
 
     /** Status change + history event in one batch so they can never disagree (§8). */
