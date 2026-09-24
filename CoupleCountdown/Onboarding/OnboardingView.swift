@@ -68,65 +68,64 @@ struct OnboardingView: View {
     }
 
     private func choiceView(displayName: String) -> some View {
-        VStack(spacing: 24) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 24) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(CoupleTheme.blush.accentColor)
 
-            Image(systemName: "heart.text.square.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(CoupleTheme.blush.accentColor)
+                Text("Hi \(displayName) — let's get you two set up")
+                    .font(.system(.title2, design: .rounded, weight: .semibold))
+                    .multilineTextAlignment(.center)
 
-            Text("Hi \(displayName) — let's get you two set up")
-                .font(.system(.title2, design: .rounded, weight: .semibold))
-                .multilineTextAlignment(.center)
-
-            // Heads off the obvious failure mode (DESIGN.md §5.3 point 2).
-            // If both partners do tap Create anyway, either can cancel theirs
-            // from the countdown screen's "waiting for your partner" card.
-            Text("Only one of you should tap Create — have your partner tap Join with the code you'll get next. Already paired? Sign in with that account instead.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-
-            VStack(spacing: 12) {
-                Button {
-                    path = .create
-                } label: {
-                    Label("Create a Pairing", systemImage: "sparkles")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .accessibilityIdentifier("createPairingButton")
-
-                Button {
-                    path = .join
-                } label: {
-                    Label("Join a Pairing", systemImage: "envelope.open.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .accessibilityIdentifier("joinPairingButton")
-            }
-            .padding(.horizontal, 32)
-
-            VStack(spacing: 4) {
-                if let email = authService.email {
-                    Text("Signed in as \(email)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Button("Sign out") { authService.signOut() }
+                // Heads off the obvious failure mode (DESIGN.md §5.3 point 2).
+                // If both partners do tap Create anyway, either can cancel theirs
+                // from the countdown screen's "waiting for your partner" card.
+                Text("Only one of you should tap Create — have your partner tap Join with the code you'll get next. Already paired? Sign in with that account instead.")
                     .font(.footnote)
-                    .accessibilityIdentifier("onboardingSignOutButton")
-            }
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
 
-            Spacer()
-            Spacer()
+                VStack(spacing: 12) {
+                    Button {
+                        path = .create
+                    } label: {
+                        Label("Create a Pairing", systemImage: "sparkles")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("createPairingButton")
+
+                    Button {
+                        path = .join
+                    } label: {
+                        Label("Join a Pairing", systemImage: "envelope.open.fill")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("joinPairingButton")
+                }
+                .padding(.horizontal, 32)
+
+                VStack(spacing: 4) {
+                    if let email = authService.email {
+                        Text("Signed in as \(email)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Sign out") { authService.signOut() }
+                        .font(.footnote)
+                        .accessibilityIdentifier("onboardingSignOutButton")
+                }
+            }
+            .padding()
+            .padding(.top, 24)
+            .frame(maxWidth: .infinity)
         }
-        .padding()
     }
 }

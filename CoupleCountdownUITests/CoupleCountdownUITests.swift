@@ -66,7 +66,16 @@ final class CoupleCountdownUITests: XCTestCase {
         passwordField.typeText(testPassword + "\n") // Return submits
 
         XCTAssertTrue(app.buttons["createPairingButton"].waitForExistence(timeout: 20), "Creating the account never reached onboarding")
+        // Existing isn't enough: a real run tapped it while the keyboard still
+        // covered it ("hit point {-1, -1}") and the tap went nowhere.
+        XCTAssertTrue(waitUntilHittable(app.buttons["createPairingButton"]), "Onboarding's Create button never became tappable")
         return email
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
+        let predicate = NSPredicate(format: "exists == true AND hittable == true")
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 
     private func signIn(_ app: XCUIApplication, email: String, password: String) {

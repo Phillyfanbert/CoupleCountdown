@@ -19,80 +19,86 @@ struct CreatePairingView: View {
     private let firestore = FirestoreService()
 
     var body: some View {
-        VStack(spacing: 20) {
-            if let generatedCode {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 40))
-                    .foregroundStyle(CoupleTheme.blush.accentColor)
+        // Scrollable: code + QR + share + note + Continue is taller than a
+        // small iPhone (or any iPhone with the keyboard still up), which left
+        // Continue off-screen and untappable.
+        ScrollView {
+            VStack(spacing: 20) {
+                if let generatedCode {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 40))
+                        .foregroundStyle(CoupleTheme.blush.accentColor)
 
-                Text("Your code")
-                    .font(.system(.headline, design: .rounded))
-                Text(generatedCode)
-                    .font(.system(.largeTitle, design: .monospaced, weight: .bold))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(CoupleTheme.blush.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .accessibilityIdentifier("generatedCodeText")
+                    Text("Your code")
+                        .font(.system(.headline, design: .rounded))
+                    Text(generatedCode)
+                        .font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(CoupleTheme.blush.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .accessibilityIdentifier("generatedCodeText")
 
-                if let qrImage = Self.qrCode(for: "couplecountdown://join/\(generatedCode)") {
-                    Image(uiImage: qrImage)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: 200, height: 200)
-                        .padding(12)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: CoupleTheme.blush.accentColor.opacity(0.2), radius: 8, y: 4)
+                    if let qrImage = Self.qrCode(for: "couplecountdown://join/\(generatedCode)") {
+                        Image(uiImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 200, height: 200)
+                            .padding(12)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: CoupleTheme.blush.accentColor.opacity(0.2), radius: 8, y: 4)
+                    }
+
+                    ShareLink(item: generatedCode) {
+                        Label("Share code", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(CoupleTheme.blush.accentColor)
+
+                    // Manually reading/typing the code is the primary,
+                    // required path — QR/deep link is best-effort convenience
+                    // only (DESIGN.md §5.3).
+                    Text("Typing the code is the reliable way to pair — the QR code and share link are best-effort convenience.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+
+                    // The account records the pairing as soon as it's created
+                    // (so the user's other devices pick it up), but this screen
+                    // only gives way to the countdown when the user taps
+                    // Continue — advancing automatically once left ~0 real time
+                    // to read/copy/share the code before it vanished (caught by
+                    // XCUITest). The countdown's "waiting for your partner" card
+                    // shows the code again afterwards.
+                    Button {
+                        holdingNewCode = false
+                    } label: {
+                        Label("Continue", systemImage: "arrow.right.circle.fill")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(CoupleTheme.blush.accentColor)
+                    .accessibilityIdentifier("continueToCountdownButton")
+                } else if isCreating {
+                    ProgressView("Creating…")
+                } else if let errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                    Button("Try again") {
+                        self.errorMessage = nil
+                        Task { await createPairing() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("retryCreatePairingButton")
                 }
-
-                ShareLink(item: generatedCode) {
-                    Label("Share code", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(CoupleTheme.blush.accentColor)
-
-                // Manually reading/typing the code is the primary,
-                // required path — QR/deep link is best-effort convenience
-                // only (DESIGN.md §5.3).
-                Text("Typing the code is the reliable way to pair — the QR code and share link are best-effort convenience.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                // The account records the pairing as soon as it's created
-                // (so the user's other devices pick it up), but this screen
-                // only gives way to the countdown when the user taps
-                // Continue — advancing automatically once left ~0 real time
-                // to read/copy/share the code before it vanished (caught by
-                // XCUITest). The countdown's "waiting for your partner" card
-                // shows the code again afterwards.
-                Button {
-                    holdingNewCode = false
-                } label: {
-                    Label("Continue", systemImage: "arrow.right.circle.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .tint(CoupleTheme.blush.accentColor)
-                .accessibilityIdentifier("continueToCountdownButton")
-            } else if isCreating {
-                ProgressView("Creating…")
-            } else if let errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                Button("Try again") {
-                    self.errorMessage = nil
-                    Task { await createPairing() }
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("retryCreatePairingButton")
             }
+            .padding()
+            .frame(maxWidth: .infinity)
         }
-        .padding()
         .themedBackground()
         .task {
             await createPairing()

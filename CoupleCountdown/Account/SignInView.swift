@@ -9,6 +9,7 @@ struct SignInView: View {
     @EnvironmentObject private var authService: AuthService
 
     private enum Mode { case createAccount, signIn }
+    private enum Field { case name, email, password }
 
     @State private var mode: Mode = .createAccount
     @State private var name = ""
@@ -17,6 +18,7 @@ struct SignInView: View {
     @State private var errorMessage: String?
     @State private var noteMessage: String?
     @State private var isWorking = false
+    @FocusState private var focusedField: Field?
 
     private let firestore = FirestoreService()
 
@@ -47,6 +49,9 @@ struct SignInView: View {
                     if mode == .createAccount {
                         TextField("Your name (what your partner sees)", text: $name)
                             .textContentType(.givenName)
+                            .focused($focusedField, equals: .name)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .email }
                             .accessibilityIdentifier("authNameField")
                     }
                     TextField("Email", text: $email)
@@ -54,9 +59,13 @@ struct SignInView: View {
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
                         .accessibilityIdentifier("authEmailField")
                     SecureField(mode == .createAccount ? "Password (6+ characters)" : "Password", text: $password)
                         .textContentType(.password)
+                        .focused($focusedField, equals: .password)
                         .submitLabel(.go)
                         .onSubmit {
                             if canSubmit { Task { await submit() } }
@@ -127,6 +136,11 @@ struct SignInView: View {
     private func submit() async {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Put the keyboard away now, while the request runs. Left up, it was
+        // still covering the lower half of the next screen (onboarding's
+        // Create/Join buttons) when that screen appeared — caught by the UI
+        // tests, whose taps landed on nothing.
+        focusedField = nil
         isWorking = true
         errorMessage = nil
         noteMessage = nil
@@ -156,6 +170,7 @@ struct SignInView: View {
     }
 
     private func resetPassword() async {
+        focusedField = nil
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         errorMessage = nil
         noteMessage = nil
