@@ -66,16 +66,67 @@ final class CoupleCountdownUITests: XCTestCase {
         passwordField.typeText(testPassword + "\n") // Return submits
 
         XCTAssertTrue(app.buttons["createPairingButton"].waitForExistence(timeout: 20), "Creating the account never reached onboarding")
-        // Existing isn't enough: a real run tapped it while the keyboard still
-        // covered it ("hit point {-1, -1}") and the tap went nowhere.
-        XCTAssertTrue(waitUntilHittable(app.buttons["createPairingButton"]), "Onboarding's Create button never became tappable")
+        declineSavePasswordPrompt(app)
         return email
     }
 
-    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
-        let predicate = NSPredicate(format: "exists == true AND hittable == true")
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
-        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    /// iOS's own "Save Password?" prompt (from the Passwords app) appears
+    /// anywhere from immediately to ~8s after a successful sign-up or sign-in
+    /// and covers the app — confirmed from the failure recordings, where it
+    /// sat over onboarding's Create/Join buttons. Real users answer it; the
+    /// tests decline it. Waits for it (returning as soon as it's handled) so
+    /// it can't arrive in the middle of a later step.
+    private func declineSavePasswordPrompt(_ app: XCUIApplication, within timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if tapNotNowIfShown(app) { return }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    @discardableResult
+    private func tapNotNowIfShown(_ app: XCUIApplication) -> Bool {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for notNow in [app.buttons["Not Now"], springboard.buttons["Not Now"]] where notNow.exists {
+            notNow.tap()
+            return true
+        }
+        return false
+    }
+
+    /// Taps `element` once it's actually tappable (existing isn't enough —
+    /// an earlier run tapped buttons that were covered and the taps went
+    /// nowhere: "hit point {-1, -1}"), declining the save-password prompt if
+    /// it's the thing in the way.
+    private func tapWhenReady(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var unobstructedChecks = 0
+        while Date() < deadline {
+            if tapNotNowIfShown(app) {
+                unobstructedChecks = 0
+            } else if element.exists {
+                if element.isHittable {
+                    element.tap()
+                    return
+                }
+                // Present but not hittable with nothing covering it: it's
+                // below the fold of a scroll view, and tap() scrolls it into
+                // view itself.
+                unobstructedChecks += 1
+                if unobstructedChecks >= 4 {
+                    element.tap()
+                    return
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTFail("\(element) never became tappable", file: file, line: line)
     }
 
     private func signIn(_ app: XCUIApplication, email: String, password: String) {
@@ -99,14 +150,14 @@ final class CoupleCountdownUITests: XCTestCase {
     private func completeOnboardingByCreating(_ app: XCUIApplication, name: String = "Alex") -> (email: String, code: String) {
         let email = signUp(app, name: name)
 
-        app.buttons["createPairingButton"].tap()
+        tapWhenReady(app.buttons["createPairingButton"], in: app)
 
         let codeText = app.staticTexts["generatedCodeText"]
         XCTAssertTrue(codeText.waitForExistence(timeout: 15), "Pairing code was never generated — createCouple() Firestore write likely failed")
         let code = codeText.label
         XCTAssertEqual(code.count, 6, "Join code should be 6 characters, got \"\(code)\"")
 
-        app.buttons["continueToCountdownButton"].tap()
+        tapWhenReady(app.buttons["continueToCountdownButton"], in: app)
         return (email, code)
     }
 
@@ -152,7 +203,7 @@ final class CoupleCountdownUITests: XCTestCase {
         // or share the code (see CreatePairingView.createPairing()).
         let app = launchFreshApp()
         signUp(app)
-        app.buttons["createPairingButton"].tap()
+        tapWhenReady(app.buttons["createPairingButton"], in: app)
 
         let codeText = app.staticTexts["generatedCodeText"]
         XCTAssertTrue(codeText.waitForExistence(timeout: 15))
@@ -168,7 +219,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         signUp(app, name: "Sam")
 
-        app.buttons["joinPairingButton"].tap()
+        tapWhenReady(app.buttons["joinPairingButton"], in: app)
 
         let codeField = app.textFields["joinCodeTextField"]
         XCTAssertTrue(codeField.waitForExistence(timeout: 10))
@@ -193,12 +244,11 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTAssertEqual(waitingCode.label, code)
 
         tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
-        let signOut = app.buttons["signOutButton"]
-        XCTAssertTrue(signOut.waitForExistence(timeout: 10))
-        signOut.tap()
+        tapWhenReady(app.buttons["signOutButton"], in: app)
 
         signIn(app, email: email, password: testPassword)
         XCTAssertTrue(waitingCode.waitForExistence(timeout: 20), "Signing back in should land on the same pairing, not onboarding")
+        declineSavePasswordPrompt(app)
         XCTAssertEqual(waitingCode.label, code)
         XCTAssertFalse(app.buttons["createPairingButton"].exists)
     }
@@ -215,9 +265,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        let cancel = app.buttons["cancelPairingButton"]
-        XCTAssertTrue(cancel.waitForExistence(timeout: 15))
-        cancel.tap()
+        tapWhenReady(app.buttons["cancelPairingButton"], in: app)
         let confirm = app.buttons["Cancel pairing"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Cancelling should ask for confirmation")
         confirm.tap()
