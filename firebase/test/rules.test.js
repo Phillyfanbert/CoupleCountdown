@@ -224,6 +224,49 @@ describe('couples/{coupleId}/{sub=**} — subcollections', () => {
   });
 });
 
+function userDoc(asUid, ofUid) {
+  const ctx = asUid ? testEnv.authenticatedContext(asUid) : testEnv.unauthenticatedContext();
+  return doc(ctx.firestore(), 'users', ofUid);
+}
+
+describe('users/{userId} — per-account record', () => {
+  it('lets an account write and read its own record', async () => {
+    await assertSucceeds(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', coupleId: COUPLE_ID }));
+    await assertSucceeds(getDoc(userDoc(UID_A, UID_A)));
+  });
+
+  it("rejects reading someone else's record", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users', UID_A), { displayName: 'Alex', coupleId: COUPLE_ID });
+    });
+    await assertFails(getDoc(userDoc(UID_B, UID_A)));
+  });
+
+  it("rejects writing someone else's record", async () => {
+    await assertFails(setDoc(userDoc(UID_B, UID_A), { displayName: 'Mallory' }));
+  });
+
+  it('rejects unauthenticated reads and writes', async () => {
+    await assertFails(getDoc(userDoc(null, UID_A)));
+    await assertFails(setDoc(userDoc(null, UID_A), { displayName: 'Alex' }));
+  });
+
+  it('rejects unexpected fields', async () => {
+    await assertFails(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', isAdmin: true }));
+  });
+
+  it('rejects a non-string coupleId and an overlong displayName', async () => {
+    await assertFails(setDoc(userDoc(UID_A, UID_A), { coupleId: 42 }));
+    await assertFails(setDoc(userDoc(UID_A, UID_A), { displayName: 'x'.repeat(61) }));
+  });
+
+  it("pointing your record at a pairing you're not in grants no access to it", async () => {
+    await seedCouple([UID_A, UID_B]);
+    await assertSucceeds(setDoc(userDoc(UID_C, UID_C), { coupleId: COUPLE_ID }));
+    await assertFails(getDoc(coupleDoc(UID_C)));
+  });
+});
+
 // Sanity check that the test setup itself is meaningful: prove the rules
 // file is actually being exercised, not vacuously passing.
 describe('sanity check', () => {

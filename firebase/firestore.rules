@@ -1,6 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Per-account record: the name this person goes by and which pairing
+    // they're in. It's what lets a second device (phone + desktop) find the
+    // same pairing after signing in. Private to its owner; the couple doc's
+    // rules below are still the only thing that grants access to a pairing,
+    // so pointing coupleId at someone else's pairing gets you nothing.
+    match /users/{userId} {
+      allow read, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null && request.auth.uid == userId &&
+        request.resource.data.keys().hasOnly(['displayName', 'coupleId']) &&
+        (!('displayName' in request.resource.data) ||
+          (request.resource.data.displayName is string &&
+           request.resource.data.displayName.size() <= 60)) &&
+        (!('coupleId' in request.resource.data) ||
+          request.resource.data.coupleId is string);
+    }
+
     match /couples/{coupleId} {
       // Readable only by an existing participant, or by anyone (i.e. a
       // holder of the code) while a slot is still open to join.
