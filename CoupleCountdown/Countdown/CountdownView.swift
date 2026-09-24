@@ -13,6 +13,8 @@ struct CountdownView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var pendingDate = Date().addingTimeInterval(7 * 86_400)
     @State private var celebrationMessage: String?
+    @State private var isConfirmingCancel = false
+    @State private var cancelError: String?
 
     // Tracks which milestones have already been shown, so reopening the
     // app or the view reloading doesn't re-celebrate the same one every
@@ -141,6 +143,9 @@ struct CountdownView: View {
     private var content: some View {
         VStack(spacing: 20) {
             if let state = sync.state {
+                if state.participantUIDs.count < 2 {
+                    waitingForPartnerCard
+                }
                 countdownCard(state: state)
                 statusBadge(state: state)
                 partnerTimeZones(state: state)
@@ -170,6 +175,60 @@ struct CountdownView: View {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
+        }
+    }
+
+    /// Shown until the partner joins. Before accounts, the code was only
+    /// ever visible on the create screen — once past it, there was no way
+    /// to see it again. Also where a mistaken pairing gets cancelled (the
+    /// realistic case: both partners tapped Create).
+    private var waitingForPartnerCard: some View {
+        VStack(spacing: 12) {
+            Text("Waiting for your partner 💌")
+                .font(.headline)
+            Text(coupleId)
+                .font(.system(.title, design: .monospaced, weight: .bold))
+                .textSelection(.enabled)
+                .accessibilityIdentifier("waitingCodeText")
+            ShareLink(item: coupleId, message: Text("Join me on CoupleCountdown with code \(coupleId)")) {
+                Label("Share code", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+            Text("They create their own account, tap Join, and enter this — in the app or on the web.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if let cancelError {
+                Text(cancelError).font(.caption).foregroundStyle(.red)
+            }
+            Button("Both tapped Create? Cancel this one") {
+                isConfirmingCancel = true
+            }
+            .font(.footnote)
+            .accessibilityIdentifier("cancelPairingButton")
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityIdentifier("waitingForPartnerCard")
+        .confirmationDialog("Cancel this pairing?", isPresented: $isConfirmingCancel, titleVisibility: .visible) {
+            Button("Cancel pairing", role: .destructive) {
+                Task { await cancelPairing() }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("Its code will stop working, and you can create a new one or join your partner's.")
+        }
+    }
+
+    private func cancelPairing() async {
+        cancelError = nil
+        do {
+            // The account listener (AccountSessionView) returns every device
+            // on this account to onboarding.
+            try await firestore.cancelPairing(coupleId: coupleId, uid: uid)
+        } catch {
+            cancelError = "Couldn't cancel — check your connection and try again."
         }
     }
 

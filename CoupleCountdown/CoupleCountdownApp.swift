@@ -1,57 +1,77 @@
 // CoupleCountdownApp.swift — @main app entry point (DESIGN.md §5.6)
 
 import SwiftUI
+import WidgetKit
 import FirebaseCore
-import FirebaseAuth
 import CoupleCountdownKit
 
 @main
 struct CoupleCountdownApp: App {
-    // Shared App Group suite (§5.6) rather than the default local suite,
-    // so the widget can read the same coupleId this device persists
-    // (DESIGN.md §5.3 point 7).
-    @AppStorage("coupleId", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
-    private var coupleId: String = ""
+    @StateObject private var authService: AuthService
 
-    @StateObject private var authService = AuthService()
+    /// False only while the XCUITest reset hook (below) is still running.
+    @State private var isReady: Bool
+
+    private static let isUITestReset = ProcessInfo.processInfo.arguments.contains("-uiTestReset")
+
+    /// UI tests sign up with addresses on this reserved, undeliverable
+    /// domain; the reset hook only ever deletes accounts on it.
+    static let uiTestEmailDomain = "@test.couplecountdown.invalid"
 
     init() {
         FirebaseApp.configure()
         // Gated behind a launch argument only XCUITest ever passes (see
-        // CoupleCountdownUITests) — lets each test start from a genuinely
-        // fresh identity/pairing instead of whatever the App Group suite
-        // and Keychain were left holding by a previous test or launch.
-        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
-            try? Auth.auth().signOut()
+        // CoupleCountdownUITests): clears device-side state so each test
+        // starts from a genuinely fresh, signed-out app.
+        if Self.isUITestReset {
             UserDefaults(suiteName: SharedIdentifiers.appGroup)?.removePersistentDomain(forName: SharedIdentifiers.appGroup)
             KeychainStore(accessGroup: SharedIdentifiers.keychainAccessGroup).delete()
         }
+        _authService = StateObject(wrappedValue: AuthService())
+        _isReady = State(initialValue: !Self.isUITestReset)
     }
 
     var body: some Scene {
         WindowGroup {
             Group {
-                if authService.uid == nil {
-                    ProgressView("Signing in…")
-                        .task {
-                            do {
-                                try await authService.signInIfNeeded()
-                            } catch {
-                                // Deliberately not swallowed via `try?` —
-                                // a silent failure here means the app is
-                                // stuck on this screen forever with no
-                                // way to tell why (caught exactly this
-                                // way during CI Simulator verification).
-                                print("AuthService.signInIfNeeded() failed: \(error)")
-                            }
-                        }
-                } else if coupleId.isEmpty {
-                    OnboardingView(coupleId: $coupleId)
+                if !isReady {
+                    ProgressView()
+                } else if let uid = authService.uid, !authService.isFinishingSignUp {
+                    AccountSessionView(uid: uid)
+                        .id(uid) // a different account gets a fresh session
                 } else {
-                    CountdownView(coupleId: coupleId, uid: authService.uid!)
+                    SignInView()
                 }
             }
             .environmentObject(authService)
+            .task {
+                guard !isReady else { return }
+                await resetForUITests()
+                isReady = true
+            }
+            .onChange(of: authService.uid) { _, uid in
+                // Signed out: the widget shouldn't keep showing this account's pairing.
+                if uid == nil {
+                    UserDefaults(suiteName: SharedIdentifiers.appGroup)?.removeObject(forKey: "coupleId")
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
+            }
         }
+    }
+
+    /// Signs out whatever the previous test left signed in — and deletes it if
+    /// it's a UI-test account, so CI runs don't pile up test users in the real
+    /// Firebase project. Never touches an account outside the test domain.
+    private func resetForUITests() async {
+        if let uid = authService.uid,
+           authService.currentAccountEmail?.hasSuffix(Self.uiTestEmailDomain) == true {
+            try? await FirestoreService().deleteProfile(uid: uid)
+            do {
+                try await authService.deleteCurrentAccount()
+            } catch {
+                print("UI-test account cleanup failed: \(error)")
+            }
+        }
+        authService.signOut()
     }
 }

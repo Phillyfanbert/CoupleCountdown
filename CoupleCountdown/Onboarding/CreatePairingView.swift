@@ -7,7 +7,9 @@ import CoupleCountdownKit
 
 struct CreatePairingView: View {
     let displayName: String
-    @Binding var coupleId: String
+    /// See AccountSessionView: keeps this screen (and its code) up after the
+    /// account records the new pairing, until the user taps Continue.
+    @Binding var holdingNewCode: Bool
 
     @EnvironmentObject private var authService: AuthService
     @State private var generatedCode: String?
@@ -58,19 +60,15 @@ struct CreatePairingView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
-                // Setting `coupleId` is what advances past onboarding —
-                // it's bound all the way up to CoupleCountdownApp's
-                // @AppStorage, so the instant it's set the whole app's
-                // root view swaps to CountdownView. createPairing() used
-                // to set it in the same breath as generatedCode, which
-                // left ~0 real time to read/copy/share the code before it
-                // vanished (caught by XCUITest: the code screen was
-                // already gone by the time a test checked for it, only
-                // seconds after the write completed). Requiring this tap
-                // is what actually gives the code screen a real, user-
-                // controlled lifetime.
+                // The account records the pairing as soon as it's created
+                // (so the user's other devices pick it up), but this screen
+                // only gives way to the countdown when the user taps
+                // Continue — advancing automatically once left ~0 real time
+                // to read/copy/share the code before it vanished (caught by
+                // XCUITest). The countdown's "waiting for your partner" card
+                // shows the code again afterwards.
                 Button {
-                    coupleId = generatedCode
+                    holdingNewCode = false
                 } label: {
                     Label("Continue", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -83,7 +81,15 @@ struct CreatePairingView: View {
             } else if isCreating {
                 ProgressView("Creating…")
             } else if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red)
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                Button("Try again") {
+                    self.errorMessage = nil
+                    Task { await createPairing() }
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("retryCreatePairingButton")
             }
         }
         .padding()
@@ -99,6 +105,9 @@ struct CreatePairingView: View {
             return
         }
         isCreating = true
+        // Must be set before the write: the account's listener sees the new
+        // pairing as soon as the server confirms it.
+        holdingNewCode = true
         let code = JoinCodeGenerator.generate()
         do {
             try await firestore.createCouple(
@@ -107,11 +116,10 @@ struct CreatePairingView: View {
                 displayName: displayName,
                 timeZoneIdentifier: TimeZone.current.identifier
             )
-            // Deliberately not also setting coupleId here — see the
-            // Continue button below.
             generatedCode = code
         } catch {
-            errorMessage = error.localizedDescription
+            holdingNewCode = false
+            errorMessage = "Couldn't create the pairing — check your connection and try again."
         }
         isCreating = false
     }

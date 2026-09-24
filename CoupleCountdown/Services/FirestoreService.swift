@@ -19,9 +19,64 @@ final class FirestoreService {
         db.collection("couples").document(coupleId)
     }
 
+    private func userRef(_ uid: String) -> DocumentReference {
+        db.collection("users").document(uid)
+    }
+
+    // MARK: - Account (users/{uid})
+
+    /// What a person's account records: the name their partner sees and the
+    /// pairing they're in. Living on the account rather than the device is
+    /// what lets the same person use the iPhone app and the web client at
+    /// once and see one pairing.
+    struct AccountProfile: Equatable {
+        var displayName: String?
+        var coupleId: String?
+    }
+
+    /// Merges the given fields into the account record (never clobbers).
+    func saveProfile(uid: String, displayName: String? = nil, coupleId: String? = nil) async throws {
+        var fields: [String: Any] = [:]
+        if let displayName { fields["displayName"] = displayName }
+        if let coupleId { fields["coupleId"] = coupleId }
+        try await userRef(uid).setData(fields, merge: true)
+    }
+
+    func deleteProfile(uid: String) async throws {
+        try await userRef(uid).delete()
+    }
+
+    /// Watches the account record. Delivers only server-confirmed state:
+    /// Firestore reports this device's own writes immediately, before the
+    /// server has them, and acting on that after "Create" would open the new
+    /// pairing before the server had stored it — the rules deny reading a
+    /// pairing that doesn't exist yet, and a denied listener never recovers.
+    /// (Found in the web client, which shares these rules.)
+    func listenToProfile(
+        uid: String,
+        onChange: @escaping (Result<AccountProfile, Error>) -> Void
+    ) -> ListenerRegistration {
+        userRef(uid).addSnapshotListener(includeMetadataChanges: true) { snapshot, error in
+            if let error {
+                onChange(.failure(error))
+                return
+            }
+            guard let snapshot, !snapshot.metadata.hasPendingWrites else { return }
+            // Offline with nothing cached: the account's state isn't known yet.
+            if snapshot.metadata.isFromCache && !snapshot.exists { return }
+            let data = snapshot.data() ?? [:]
+            onChange(.success(AccountProfile(
+                displayName: data["displayName"] as? String,
+                coupleId: data["coupleId"] as? String
+            )))
+        }
+    }
+
     // MARK: - Pairing (§5.3)
 
-    /// Creates a new couple doc with the caller as the sole participant.
+    /// Creates a new couple doc with the caller as the sole participant, and
+    /// records it on the caller's account in the same batch — so a pairing can
+    /// never exist without the account knowing about it.
     func createCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
         let state = RelationshipState(
             status: .apart,
@@ -31,7 +86,10 @@ final class FirestoreService {
             lastUpdatedBy: uid,
             lastUpdatedAt: Date()
         )
-        try await coupleRef(coupleId).setData(from: state)
+        let batch = db.batch()
+        try batch.setData(from: state, forDocument: coupleRef(coupleId))
+        batch.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
+        try await batch.commit()
         // codeExpiresAt (§5.3 point 6) is Firestore-lifecycle-only
         // metadata, not modeled in RelationshipState — kept out of the
         // create write so the Security Rules' create check
@@ -54,13 +112,26 @@ final class FirestoreService {
         try await coupleRef(coupleId).updateData([
             "participantUIDs": FieldValue.arrayUnion([uid]),
         ])
-        try await coupleRef(coupleId).updateData([
+        let batch = db.batch()
+        batch.updateData([
             "partnerProfiles.\(uid)": [
                 "displayName": displayName,
                 "timeZoneIdentifier": timeZoneIdentifier,
             ],
             "codeExpiresAt": FieldValue.delete(),
-        ])
+        ], forDocument: coupleRef(coupleId))
+        batch.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
+        try await batch.commit()
+    }
+
+    /// Cancels a pairing nobody has joined yet (e.g. both partners tapped
+    /// Create): marks it closed so the rules refuse any further join, and
+    /// detaches it from the account so the user can create or join another.
+    func cancelPairing(coupleId: String, uid: String) async throws {
+        let batch = db.batch()
+        batch.updateData(["closed": true], forDocument: coupleRef(coupleId))
+        batch.setData(["coupleId": FieldValue.delete()], forDocument: userRef(uid), merge: true)
+        try await batch.commit()
     }
 
     // MARK: - Sync (§5.2)

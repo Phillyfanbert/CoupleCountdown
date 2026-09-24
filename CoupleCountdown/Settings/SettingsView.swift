@@ -10,6 +10,8 @@ struct SettingsView: View {
     @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
     private var selectedTheme: String = CoupleTheme.blush.rawValue
 
+    @EnvironmentObject private var authService: AuthService
+
     var body: some View {
         Form {
             Section("Theme") {
@@ -33,6 +35,22 @@ struct SettingsView: View {
                     .accessibilityIdentifier("theme_\(theme.rawValue)")
                     .accessibilityAddTraits(selectedTheme == theme.rawValue ? .isSelected : [])
                 }
+            }
+
+            Section {
+                if let email = authService.email {
+                    Text("Signed in as \(email)")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("accountEmailText")
+                }
+                Button("Sign out", role: .destructive) {
+                    authService.signOut()
+                }
+                .accessibilityIdentifier("signOutButton")
+            } header: {
+                Text("Account")
+            } footer: {
+                Text("Sign in with this account in the app or on the web to see the same countdown on your phone and your computer.")
             }
         }
         .navigationTitle("Settings")

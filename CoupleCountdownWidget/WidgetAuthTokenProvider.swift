@@ -3,8 +3,8 @@
 import Foundation
 import CoupleCountdownKit
 
-/// Mints a fresh Firebase ID token from the Anonymous Auth refresh token
-/// the app persisted into the shared Keychain (§5.5) — plain REST against
+/// Mints a fresh Firebase ID token from the signed-in account's refresh
+/// token the app persisted into the shared Keychain (§5.5) — plain REST against
 /// Google's token endpoint, no Firebase Auth SDK bundled into the widget
 /// extension.
 struct WidgetAuthTokenProvider {

@@ -1,12 +1,17 @@
-// OnboardingView.swift — Create/Join entry screen + display-name step (DESIGN.md §5.3 point 2)
+// OnboardingView.swift — Create/Join entry screen for a signed-in account without a pairing (DESIGN.md §5.3 point 2)
 
 import SwiftUI
 
 struct OnboardingView: View {
-    @Binding var coupleId: String
+    let uid: String
+    /// The account's display name — set at sign-up, so the name step only
+    /// appears for an account that somehow has none.
+    let profileName: String?
+    @Binding var holdingNewCode: Bool
 
-    @State private var displayName = ""
-    @State private var didEnterName = false
+    @EnvironmentObject private var authService: AuthService
+    @State private var nameDraft = ""
+    @State private var nameError: String?
     @State private var path: Path = .choice
 
     private enum Path {
@@ -15,21 +20,33 @@ struct OnboardingView: View {
         case join
     }
 
+    private let firestore = FirestoreService()
+
+    private var displayName: String? {
+        guard let profileName, !profileName.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return profileName
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if !didEnterName {
-                    DisplayNameEntryView(displayName: $displayName) {
-                        didEnterName = true
-                    }
-                } else {
+                if let displayName {
                     switch path {
                     case .choice:
-                        choiceView
+                        choiceView(displayName: displayName)
                     case .create:
-                        CreatePairingView(displayName: displayName, coupleId: $coupleId)
+                        CreatePairingView(displayName: displayName, holdingNewCode: $holdingNewCode)
                     case .join:
-                        JoinPairingView(displayName: displayName, coupleId: $coupleId)
+                        JoinPairingView(displayName: displayName) { path = .choice }
+                    }
+                } else {
+                    VStack {
+                        DisplayNameEntryView(displayName: $nameDraft) {
+                            Task { await saveName() }
+                        }
+                        if let nameError {
+                            Text(nameError).font(.caption).foregroundStyle(.red)
+                        }
                     }
                 }
             }
@@ -39,7 +56,18 @@ struct OnboardingView: View {
         .tint(CoupleTheme.blush.accentColor)
     }
 
-    private var choiceView: some View {
+    private func saveName() async {
+        nameError = nil
+        do {
+            // The account record's listener (AccountSessionView) picks the
+            // new name up and re-renders this view past the name step.
+            try await firestore.saveProfile(uid: uid, displayName: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+        } catch {
+            nameError = "Couldn't save — check your connection and try again."
+        }
+    }
+
+    private func choiceView(displayName: String) -> some View {
         VStack(spacing: 24) {
             Spacer()
 
@@ -47,14 +75,14 @@ struct OnboardingView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(CoupleTheme.blush.accentColor)
 
-            Text("Let's get you two set up")
+            Text("Hi \(displayName) — let's get you two set up")
                 .font(.system(.title2, design: .rounded, weight: .semibold))
+                .multilineTextAlignment(.center)
 
-            // Heads off the obvious failure mode (DESIGN.md §5.3 point 2)
-            // — if both partners mistakenly tap Create, the result is
-            // just two unused, self-cleaning couple docs, not corruption,
-            // but the copy here is what's actually supposed to prevent it.
-            Text("Only one of you should tap Create — have your partner tap Join with the code you'll get next.")
+            // Heads off the obvious failure mode (DESIGN.md §5.3 point 2).
+            // If both partners do tap Create anyway, either can cancel theirs
+            // from the countdown screen's "waiting for your partner" card.
+            Text("Only one of you should tap Create — have your partner tap Join with the code you'll get next. Already paired? Sign in with that account instead.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -84,6 +112,17 @@ struct OnboardingView: View {
                 .accessibilityIdentifier("joinPairingButton")
             }
             .padding(.horizontal, 32)
+
+            VStack(spacing: 4) {
+                if let email = authService.email {
+                    Text("Signed in as \(email)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Sign out") { authService.signOut() }
+                    .font(.footnote)
+                    .accessibilityIdentifier("onboardingSignOutButton")
+            }
 
             Spacer()
             Spacer()

@@ -4,17 +4,30 @@
 // instance against the real (free-tier) Firebase project — there is no
 // mock backend, so these exercise real Firestore/Auth round-trips.
 //
-// Each test launches with "-uiTestReset" (see CoupleCountdownApp.init())
-// so it starts from a genuinely fresh anonymous identity and an empty App
-// Group suite, rather than depending on whatever a previous test left
-// behind — tests are independent and order-agnostic.
+// Each test launches with "-uiTestReset" (see CoupleCountdownApp) so it
+// starts signed out with an empty App Group suite, then creates its own
+// account on the reserved, undeliverable test.couplecountdown.invalid domain.
+// The reset hook deletes the previous test's account, and the class tearDown
+// runs it once more, so CI doesn't leave test users in the Firebase project.
 
 import XCTest
 
 final class CoupleCountdownUITests: XCTestCase {
 
+    private let testPassword = "uitest-pw-1234"
+
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    override class func tearDown() {
+        // One more reset so the last test's account is deleted too.
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestReset"]
+        app.launch()
+        _ = app.textFields["authNameField"].waitForExistence(timeout: 30)
+        app.terminate()
+        super.tearDown()
     }
 
     // MARK: - Helpers
@@ -30,17 +43,52 @@ final class CoupleCountdownUITests: XCTestCase {
         return app
     }
 
-    /// Drives name entry + "Create a Pairing" through to the countdown
-    /// screen. Every real-flow test needs a paired couple to get anywhere
-    /// past onboarding, so this is shared setup, not itself the thing
-    /// under test in most callers.
+    private func makeTestEmail() -> String {
+        "uitest-\(UUID().uuidString.prefix(8).lowercased())@test.couplecountdown.invalid"
+    }
+
+    /// Creates a fresh account from the sign-up screen and waits for
+    /// onboarding. Returns the account's email.
     @discardableResult
-    private func completeOnboardingByCreating(_ app: XCUIApplication, name: String = "Alex") -> String {
-        let nameField = app.textFields["nameTextField"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 10), "Name entry field never appeared")
+    private func signUp(_ app: XCUIApplication, name: String = "Alex") -> String {
+        let nameField = app.textFields["authNameField"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 30), "Sign-up screen never appeared")
         nameField.tap()
         nameField.typeText(name)
-        app.buttons["continueButton"].tap()
+
+        let email = makeTestEmail()
+        let emailField = app.textFields["authEmailField"]
+        emailField.tap()
+        emailField.typeText(email)
+
+        let passwordField = app.secureTextFields["authPasswordField"]
+        passwordField.tap()
+        passwordField.typeText(testPassword + "\n") // Return submits
+
+        XCTAssertTrue(app.buttons["createPairingButton"].waitForExistence(timeout: 20), "Creating the account never reached onboarding")
+        return email
+    }
+
+    private func signIn(_ app: XCUIApplication, email: String, password: String) {
+        let toggle = app.buttons["authToggleButton"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20), "Sign-in screen never appeared")
+        toggle.tap()
+        let emailField = app.textFields["authEmailField"]
+        XCTAssertTrue(emailField.waitForExistence(timeout: 5))
+        emailField.tap()
+        emailField.typeText(email)
+        let passwordField = app.secureTextFields["authPasswordField"]
+        passwordField.tap()
+        passwordField.typeText(password + "\n")
+    }
+
+    /// Signs up, then drives "Create a Pairing" through to the countdown
+    /// screen. Every real-flow test needs a paired couple to get anywhere
+    /// past onboarding, so this is shared setup, not itself the thing
+    /// under test in most callers. Returns the account email and join code.
+    @discardableResult
+    private func completeOnboardingByCreating(_ app: XCUIApplication, name: String = "Alex") -> (email: String, code: String) {
+        let email = signUp(app, name: name)
 
         app.buttons["createPairingButton"].tap()
 
@@ -50,7 +98,7 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTAssertEqual(code.count, 6, "Join code should be 6 characters, got \"\(code)\"")
 
         app.buttons["continueToCountdownButton"].tap()
-        return code
+        return (email, code)
     }
 
     /// CountdownView's toolbar puts importantDatesNavLink/settingsNavLink
@@ -94,11 +142,7 @@ final class CoupleCountdownUITests: XCTestCase {
         // whole app past this screen before a user could ever read, copy,
         // or share the code (see CreatePairingView.createPairing()).
         let app = launchFreshApp()
-        let nameField = app.textFields["nameTextField"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
-        nameField.tap()
-        nameField.typeText("Alex")
-        app.buttons["continueButton"].tap()
+        signUp(app)
         app.buttons["createPairingButton"].tap()
 
         let codeText = app.staticTexts["generatedCodeText"]
@@ -113,12 +157,7 @@ final class CoupleCountdownUITests: XCTestCase {
 
     func testJoinPairingWithInvalidCodeShowsError() {
         let app = launchFreshApp()
-
-        let nameField = app.textFields["nameTextField"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
-        nameField.tap()
-        nameField.typeText("Sam")
-        app.buttons["continueButton"].tap()
+        signUp(app, name: "Sam")
 
         app.buttons["joinPairingButton"].tap()
 
@@ -130,6 +169,51 @@ final class CoupleCountdownUITests: XCTestCase {
 
         let errorText = app.staticTexts["joinErrorText"]
         XCTAssertTrue(errorText.waitForExistence(timeout: 15), "Joining a nonexistent code should surface an error, not hang or silently no-op")
+    }
+
+    // MARK: - Accounts
+
+    func testSignOutAndBackInKeepsThePairing() {
+        // The pairing lives on the account, not the device: signing back in
+        // (as a second device would) goes straight to the same pairing.
+        let app = launchFreshApp()
+        let (email, code) = completeOnboardingByCreating(app)
+
+        let waitingCode = app.staticTexts["waitingCodeText"]
+        XCTAssertTrue(waitingCode.waitForExistence(timeout: 15), "Waiting-for-partner card should show the code after Continue")
+        XCTAssertEqual(waitingCode.label, code)
+
+        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
+        let signOut = app.buttons["signOutButton"]
+        XCTAssertTrue(signOut.waitForExistence(timeout: 10))
+        signOut.tap()
+
+        signIn(app, email: email, password: testPassword)
+        XCTAssertTrue(waitingCode.waitForExistence(timeout: 20), "Signing back in should land on the same pairing, not onboarding")
+        XCTAssertEqual(waitingCode.label, code)
+        XCTAssertFalse(app.buttons["createPairingButton"].exists)
+    }
+
+    func testWrongPasswordShowsError() {
+        let app = launchFreshApp()
+        signIn(app, email: makeTestEmail(), password: "definitely-wrong")
+        let error = app.staticTexts["authErrorText"]
+        XCTAssertTrue(error.waitForExistence(timeout: 15), "A failed sign-in should say so, not hang or silently no-op")
+        XCTAssertTrue(error.label.contains("incorrect"), "Unexpected error text: \(error.label)")
+    }
+
+    func testCancelPairingReturnsToOnboarding() {
+        let app = launchFreshApp()
+        completeOnboardingByCreating(app)
+
+        let cancel = app.buttons["cancelPairingButton"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 15))
+        cancel.tap()
+        let confirm = app.buttons["Cancel pairing"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Cancelling should ask for confirmation")
+        confirm.tap()
+
+        XCTAssertTrue(app.buttons["createPairingButton"].waitForExistence(timeout: 20), "Cancelling should return the account to onboarding")
     }
 
     // MARK: - Countdown / status toggle / date sheet

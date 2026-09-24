@@ -4,7 +4,7 @@ import SwiftUI
 
 struct JoinPairingView: View {
     let displayName: String
-    @Binding var coupleId: String
+    let onBack: () -> Void
 
     @EnvironmentObject private var authService: AuthService
     @State private var enteredCode = ""
@@ -54,6 +54,10 @@ struct JoinPairingView: View {
             .disabled(enteredCode.trimmingCharacters(in: .whitespaces).isEmpty || isJoining)
             .accessibilityIdentifier("joinButton")
 
+            Button("Back", action: onBack)
+                .font(.footnote)
+                .accessibilityIdentifier("joinBackButton")
+
             Spacer()
             Spacer()
         }
@@ -67,6 +71,7 @@ struct JoinPairingView: View {
             return
         }
         let code = enteredCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        errorMessage = nil
         isJoining = true
         do {
             try await firestore.joinCouple(
@@ -75,11 +80,12 @@ struct JoinPairingView: View {
                 displayName: displayName,
                 timeZoneIdentifier: TimeZone.current.identifier
             )
-            coupleId = code
+            // Joining also records the pairing on the account; the account
+            // listener (AccountSessionView) moves every device to the countdown.
         } catch {
-            // Deliberately generic — a wrong/expired/already-full code all
-            // fail the Security Rules the same way (permission denied),
-            // and DESIGN.md §5.3's rules don't distinguish those cases.
+            // Deliberately generic — a wrong, expired, already-full, or
+            // cancelled code all fail the Security Rules the same way
+            // (permission denied).
             errorMessage = "Couldn't join — check the code and try again."
         }
         isJoining = false
