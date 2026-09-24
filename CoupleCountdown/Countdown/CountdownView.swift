@@ -233,6 +233,12 @@ struct CountdownView: View {
         .padding(20)
         .frame(maxWidth: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        // .contain first: an identifier on a plain stack is pushed down onto
+        // every child, replacing theirs — CI's accessibility snapshots showed
+        // the code text and the cancel button both reporting
+        // "waitingForPartnerCard", so waitingCodeText/cancelPairingButton
+        // could never be found.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("waitingForPartnerCard")
         .confirmationDialog("Cancel this pairing?", isPresented: $isConfirmingCancel, titleVisibility: .visible) {
             Button("Cancel pairing", role: .destructive) {
