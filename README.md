@@ -1,6 +1,6 @@
 # CoupleCountdown
 
-![Platform](https://img.shields.io/badge/platform-iOS-lightgrey)
+![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Web-lightgrey)
 ![Swift](https://img.shields.io/badge/UI-SwiftUI%20%2B%20WidgetKit-orange)
 ![Backend](https://img.shields.io/badge/backend-Firebase%20Firestore-yellow)
 ![Status](https://img.shields.io/badge/status-working-brightgreen)
@@ -17,22 +17,34 @@ update from their own phone.
 Firebase backend, an XCUITest suite exercising every feature against that
 live backend, and a CI pipeline that builds, tests, and publishes an
 installable build on every push — see
-[Install on your iPhone](#install-on-your-iphone) below. The full
+[Use it](#use-it) below. The full
 architecture, decisions, and rationale live in [`DESIGN.md`](DESIGN.md).
 
-## Install on your iPhone
+## Use it
 
-No Apple Developer account, no App Store, no cloning this repo — install
-via [SideStore](https://sidestore.io), a free sideloading tool.
+**On the web — any phone, tablet, or computer, nothing to install:**
+**<https://couplecountdown-7715c.web.app>**. On a phone, use Share → *Add to
+Home Screen* for an app-style icon. The web version has the full core
+experience (pairing, live countdown, apart/together, important dates, stats,
+"thinking of you", themes) and syncs with the iPhone app through the same
+backend and join codes — but, as a website, it can't provide a Home Screen
+or Lock Screen widget.
+
+**On iPhone, with the widget:** no Apple Developer account, no App Store,
+no cloning this repo — install via [SideStore](https://sidestore.io), a free
+sideloading tool.
 
 👉 **[Install CoupleCountdown](https://claude.ai/code/artifact/9ed9d819-165c-4b3b-a503-950ad8e4c809)** —
 open this on the iPhone you want it on. It has one-tap install/update
 links (GitHub strips custom app links like `sidestore://` from rendered
 Markdown, which is why they're on that page instead of directly here) and
 a link to SideStore's own setup guide if you don't have SideStore yet.
-
 Both links on that page point at a rolling release that's rebuilt
 automatically on every push to `main`, so they never go stale.
+
+One thing to know either way: each browser or phone signs in as its own
+anonymous identity, and a pairing holds exactly two people — so a third
+device can't join an existing pairing.
 
 ## Why this project
 
@@ -92,7 +104,9 @@ app":
 
 ## Tech stack
 
-- **UI**: SwiftUI, WidgetKit (Home Screen + Lock Screen widgets)
+- **UI**: SwiftUI, WidgetKit (Home Screen + Lock Screen widgets) on iPhone;
+  a dependency-free static web client (`web/`) hosted on Firebase Hosting's
+  free tier
 - **Backend**: Firebase Firestore (free Spark plan) + Firebase Anonymous
   Authentication
 - **Sync**: no push notifications — a layered, honestly-documented

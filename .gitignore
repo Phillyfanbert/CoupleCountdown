@@ -109,3 +109,10 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Web client (web/) — static HTML/CSS/JS + PWA manifest, hosted on Firebase
+# Hosting's free tier. The Firebase project pointer lives in .firebaserc.
+!*.html
+!*.css
+!*.webmanifest
+!.firebaserc

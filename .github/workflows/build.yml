@@ -248,6 +248,22 @@ jobs:
         working-directory: CoupleCountdownKit
         run: swift test
 
+  test-web-logic:
+    name: Run web client logic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Pure-function ports of the Swift stats/date logic (web/logic.js) —
+      # mirrors CoupleCountdownKitTests so the web client can't drift from
+      # the iPhone app's behavior.
+      - name: node --test
+        run: node --test web/logic.test.js
+
   test-firestore-rules:
     name: Run Firestore Security Rules tests
     runs-on: ubuntu-latest

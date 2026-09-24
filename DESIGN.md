@@ -838,6 +838,21 @@ in push/pairing plumbing.
 
 ## 13. Next steps
 
+**Web client (added later)**: `web/` is a plain static site (ES modules, no
+build step) on Firebase Hosting's free tier, sharing the iPhone app's
+Firestore data model, Security Rules, and join codes field-for-field
+(`web/data.js` mirrors `FirestoreService.swift`; `web/logic.js` ports the
+stats/date logic and is unit-tested in CI against the same cases as the Swift
+tests). It exists because a website is the only $0 way to reach desktops and
+Android — and because it can't provide WidgetKit widgets, it complements the
+native app rather than replacing it. Known parity gaps, deliberately fixed on
+web first: leaving always asks for a new meetup date (the iPhone app only asks
+when none is stored, so a second goodbye shows the previous trip's expired
+countdown), and a yearly date that falls *today* shows "Today" instead of
+rolling to next year. Identity is per browser/device (anonymous auth), so one
+person can't use both the iPhone app and the web client in the same pairing.
+Milestone celebrations are not in the web v1.
+
 **Distribution pivot (supersedes §2's original plan)**: rather than
 installing Xcode locally, the build/verify loop now runs entirely on
 GitHub Actions — `project.yml` (XcodeGen) generates the real `.xcodeproj`

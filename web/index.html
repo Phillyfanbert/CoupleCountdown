@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-theme="blush">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CoupleCountdown</title>
+  <meta name="description" content="A shared countdown for long-distance couples.">
+  <meta name="theme-color" content="#FF6F91">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="CoupleCountdown">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app": "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app" aria-live="polite">
+    <div class="center"><p class="muted">Signing in…</p></div>
+  </div>
+  <noscript><p class="center">CoupleCountdown needs JavaScript to run.</p></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
