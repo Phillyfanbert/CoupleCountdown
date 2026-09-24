@@ -122,7 +122,7 @@ final class AuthService: ObservableObject {
     /// Plain-language message for a sign-in / sign-up failure.
     static func message(for error: Error) -> String {
         let nsError = error as NSError
-        guard nsError.domain == AuthErrorCode.domain,
+        guard nsError.domain == AuthErrors.domain,
               let code = AuthErrorCode(rawValue: nsError.code)
         else {
             return "Couldn't sign in — try again."
