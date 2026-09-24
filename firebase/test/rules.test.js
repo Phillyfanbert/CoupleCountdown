@@ -126,6 +126,21 @@ describe('couples/{coupleId} — join while open', () => {
   });
 });
 
+describe('couples/{coupleId} — cancelled pairing', () => {
+  it('lets the creator mark their still-open pairing closed', async () => {
+    await seedCouple([UID_A]);
+    await assertSucceeds(updateDoc(coupleDoc(UID_A), { closed: true }));
+  });
+
+  it('rejects joining a pairing its creator cancelled', async () => {
+    await seedCouple([UID_A]);
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'couples', COUPLE_ID), { closed: true });
+    });
+    await assertFails(updateDoc(coupleDoc(UID_B), { participantUIDs: [UID_A, UID_B] }));
+  });
+});
+
 describe('couples/{coupleId} — join while full', () => {
   it('rejects a third uid trying to join once both slots are filled', async () => {
     await seedCouple([UID_A, UID_B]);

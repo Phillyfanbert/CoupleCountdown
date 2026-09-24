@@ -39,8 +39,11 @@ service cloud.firestore {
            .hasAny(['participantUIDs']))
         ||
         // Joining: append self only, only while a slot is open, only
-        // that one field changes.
+        // that one field changes, and never into a pairing its creator
+        // cancelled (e.g. after both partners tapped Create) — otherwise an
+        // old code would still pair you with someone who has moved on.
         (resource.data.participantUIDs.size() < 2 &&
+         resource.data.get('closed', false) != true &&
          !(request.auth.uid in resource.data.participantUIDs) &&
          request.resource.data.participantUIDs ==
            resource.data.participantUIDs.concat([request.auth.uid]) &&
