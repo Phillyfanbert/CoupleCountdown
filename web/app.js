@@ -79,6 +79,9 @@ const S = {
   calMonth: null, // { y, m } shown on the Calendar tab
   calSelected: null, // "YYYY-MM-DD" selected on the Calendar tab
   pings: { all: [], dismissed: new Set(), unseen: [], error: null }, // the partner's "thinking of you"s
+  // Per meetup (its time in ms) on this device: already asked "have you met
+  // up?", and answered "not yet". Kept in memory too, in case storage is blocked.
+  metUp: { asked: store.get("metUpAskedFor"), notYet: store.get("metUpNotYetFor") },
   unsubProfile: null,
   unsubCouple: null,
   unsubPings: null,
@@ -478,6 +481,10 @@ function listen() {
         S.loadError = "We couldn't find this pairing anymore.";
       } else {
         const d = snap.data();
+        if (S.couple?.status === "apart" && d.status === "together" && d.lastUpdatedBy !== S.user?.uid) {
+          const name = d.partnerProfiles?.[d.lastUpdatedBy]?.displayName || "Your partner";
+          celebrate(`${name} says you're together! Congratulations 💞`);
+        }
         S.couple = {
           status: d.status,
           nextMeetupDate: d.nextMeetupDate?.toDate?.() ?? null,
@@ -651,7 +658,20 @@ function countdownCard(c) {
     return card(h("div", { class: "empty-big" }, "🗓️"), h("h2", { id: "noDateText" }, "No visit planned yet"), h("p", { class: "muted" }, "When do you see each other next?"), planButton("Plan your next visit", "plan"));
   }
   if (state === "arrived") {
-    return card(h("div", { class: "empty-big" }, "🎉"), h("h2", {}, "The day is here"), h("p", { class: "muted" }, "Tap “We're together now” when you meet — or pick a new date if plans changed."), planButton("Pick a new date", "plan"));
+    // The countdown's done: ask before celebrating — a late flight shouldn't
+    // get congratulations.
+    const key = meetupKey(c);
+    const notYet = S.metUp.notYet === key;
+    return card(
+      h("div", { class: "empty-big" }, "⏰"),
+      h("h2", { id: "countdownDoneText" }, "The countdown's done!"),
+      h("p", { id: "metUpQuestionText" }, "Have you two met up?"),
+      notYet ? h("p", { class: "muted small" }, "No rush. Tap Yes when you're together, or change the time if plans moved.") : null,
+      h("div", { class: "stack", style: "margin-top:12px" },
+        h("button", { class: "btn primary", id: "metUpYesButton", onclick: confirmMetUp }, "💞 Yes, we're together!"),
+        notYet
+          ? h("button", { class: "btn", id: "rescheduleButton", onclick: () => openVisitModal("change") }, "Change the time")
+          : h("button", { class: "btn", id: "metUpNotYetButton", onclick: () => { rememberMetUp("notYet", key); renderTab(); } }, "Not yet")));
   }
   return card(
     h("div", { class: "label" }, "Until we're together again"),
@@ -681,8 +701,10 @@ function tick() {
   const card = document.querySelector(".card.countdown");
   if (card && card.dataset.state !== countdownState(c)) {
     renderTab();
+    askIfMetUp();
     return;
   }
+  if (card?.dataset.state === "arrived") askIfMetUp();
   if (!document.getElementById("units")) return;
   const p = countdownParts(c.nextMeetupDate);
   if (!p) return;
@@ -702,6 +724,7 @@ async function onToggle(button, error) {
   try {
     if (c.status === "apart") {
       await S.api.setStatus(S.coupleId, "together");
+      celebrate("Congratulations! You're together again 💞");
     } else {
       // Every goodbye is a new trip: count down to the next *planned* visit,
       // or ask for one if nothing is planned.
@@ -716,6 +739,63 @@ async function onToggle(button, error) {
   }
   S.busy = false;
   button.disabled = false;
+}
+
+// ---------- "have you met up?" and the celebration ----------
+const meetupKey = (c) => String(c.nextMeetupDate?.getTime() ?? "");
+
+function rememberMetUp(field, key) {
+  S.metUp[field] = key;
+  store.set(field === "asked" ? "metUpAskedFor" : "metUpNotYetFor", key);
+}
+
+/** When the countdown runs out, ask once per meetup on this device. The card keeps asking after that. */
+function askIfMetUp() {
+  const c = S.couple;
+  if (!c || countdownState(c) !== "arrived") return;
+  const key = meetupKey(c);
+  if (S.metUp.asked === key || document.querySelector(".modal-backdrop")) return;
+  rememberMetUp("asked", key);
+  const close = openModal("The countdown's done! ⏰", "Have you met up?",
+    h("p", {}, "Have you two met up?"),
+    h("button", { class: "btn primary", id: "metUpModalYesButton", onclick: () => { close(); confirmMetUp(); } }, "💞 Yes, we're together!"),
+    h("button", { class: "btn", id: "metUpModalNotYetButton", onclick: () => { close(); rememberMetUp("notYet", key); renderTab(); } }, "Not yet"));
+}
+
+/** "Yes, we're together!" — only now does it celebrate. */
+async function confirmMetUp() {
+  if (S.busy || S.couple?.status !== "apart") return;
+  S.busy = true;
+  document.querySelectorAll("#metUpYesButton").forEach((b) => { b.disabled = true; });
+  try {
+    await S.api.setStatus(S.coupleId, "together");
+    celebrate("Congratulations! You're together again 💞");
+  } catch (e) {
+    console.error("confirmMetUp failed", e);
+    const error = document.getElementById("homeError");
+    if (error) {
+      error.textContent = "Couldn't update — check your connection and try again.";
+      error.hidden = false;
+    }
+    document.querySelectorAll("#metUpYesButton").forEach((b) => { b.disabled = false; });
+  }
+  S.busy = false;
+}
+
+/** Congratulations with falling hearts; tap it or wait a few seconds to close. */
+function celebrate(message) {
+  document.getElementById("celebration")?.remove();
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const pieces = calm ? [] : Array.from({ length: 28 }, (_, i) => h("span", {
+    class: "confetti",
+    "aria-hidden": "true",
+    style: `left:${(3 + Math.random() * 94).toFixed(1)}%;animation-delay:${(Math.random() * 0.9).toFixed(2)}s;--spin:${Math.round(Math.random() * 600 - 300)}deg`,
+  }, ["🎉", "💕", "✨", "💞", "🥳", "💖"][i % 6]));
+  const overlay = h("div", { class: "celebration", id: "celebration", role: "status", onclick: () => overlay.remove() },
+    pieces,
+    h("div", { class: "celebration-card" }, h("div", { class: "empty-big" }, "🎉"), h("h2", { id: "celebrationText" }, message)));
+  document.body.append(overlay);
+  setTimeout(() => overlay.remove(), 5000);
 }
 
 async function onPing(button, error) {

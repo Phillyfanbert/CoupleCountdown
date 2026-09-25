@@ -33,7 +33,9 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
     (§7.4, §7.5).
   - Each partner's local time (§9.1).
   - Themes (§9).
-  - Milestone celebrations (§7.3, iPhone only).
+  - A countdown in days, hours, minutes, and seconds that ends by asking
+    "Have you met up?"; congratulations and confetti come only after a yes
+    (§7.3). Round-number milestones are celebrated too (iPhone only).
   - "Thinking of you": sent from either client, shown to the partner on
     their countdown screen and iPhone widget until they dismiss it or send
     one back (§7.1).
@@ -49,8 +51,8 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
   release. SideStore installs the app and signs it with the user's free
   Apple ID (§13).
 - **Tests in CI:**
-  - 15 XCUITests against the live backend;
-  - 25 `CoupleCountdownKit` unit tests;
+  - 16 XCUITests against the live backend;
+  - 28 `CoupleCountdownKit` unit tests;
   - 31 Security Rules tests on the emulator;
   - 21 web logic tests, run in five time zones.
 
@@ -64,7 +66,7 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
 - **Themes are per device**, not per couple as §9 planned: App Group
   storage on iPhone (shared with the widget) and browser storage on web.
 - **The web client** has no widget, which a website can't provide, and no
-  milestone celebration. Neither client has push notifications (§2).
+  round-number milestone celebration. Neither client has push notifications (§2).
 - **Leaving a pairing** isn't possible once the partner has joined. The only
   options are cancelling before then, and signing out.
 
@@ -755,12 +757,17 @@ made:
   immediate re-request and risk hammering the refresh budget). The 30-minute
   ask is a request, not a guarantee — WidgetKit's actual cadence is still
   OS-controlled per §5.2 #4, this just states the intent explicitly instead
-  of leaving it to whatever the default would have been. *(As built: a
-  second entry at the meetup moment itself makes the widget switch to "The
-  day is here" on time, rather than at its next refresh. The widget's states
-  are together, counting down, the day is here, plan your next visit, and
-  not paired yet, plus a "thinking of you" line (§7.1). Two fixes found
-  while adding that line, neither visible in CI's Simulator runs: the view
+  of leaving it to whatever the default would have been. *(As built: the
+  countdown is the whole days as text plus a live `Text(timerInterval:)` for
+  the hours, minutes, and seconds left in the current day. The widget can't
+  redraw every second itself, so the timeline has an entry at each moment
+  the day count drops, and one at the meetup moment where it switches to
+  asking "Have you met up?". That keeps it current however late the next
+  refresh comes (`CountdownFormatter.widgetDay` / `widgetTimelineDates`,
+  unit-tested). The widget's states are together, counting down, have you
+  met up, plan your next visit, and not paired yet, plus a "thinking of
+  you" line (§7.1).)* *(Also as built: two fixes found while adding the
+  "thinking of you" line, neither visible in CI's Simulator runs. The view
   now sets `containerBackground`, without which iOS 17+ shows "Please adopt
   containerBackground API" in place of the widget. The REST responses are
   now decoded by `FirestoreREST` in `CoupleCountdownKit`, where they're
@@ -845,6 +852,26 @@ the countdown hits zero while the phone is asleep, celebration fires next
 time it's checked) rather than at the exact instant. Not worth engineering
 around for v1.
 
+**As built: the countdown asks before it celebrates.** Celebrating the
+instant the timer hit zero congratulated couples whose flight was late.
+The flow now:
+
+- **At zero,** both apps switch the countdown card to "The countdown's
+  done! Have you two met up?" with *Yes, we're together!* and *Not yet*.
+  They also ask once in a popup at that moment, once per meetup on each
+  device.
+- **"Not yet"** keeps the question on the card and adds *Change the time*,
+  for a delayed flight.
+- **"Yes"** (or "We're together now") sets the status to together. Only
+  then does that device show the congratulations, with confetti and a
+  haptic on iPhone.
+- **The partner's device,** if open, sees the status flip through its
+  listener and congratulates them too ("Sam says you're together!").
+- **The widget** asks as well, and tapping it opens the app to answer.
+
+Round-number days-together milestones still celebrate on their own
+(iPhone only).
+
 ### 7.4 Anniversary / important-date counters (separate countdown type)
 
 In addition to the "next meetup" countdown, support a small list of
@@ -886,9 +913,10 @@ found the single `nextMeetupDate` model fell short, so it now follows a plan:
   already-passed date, and the iPhone had no way to enter the next one.
 - **Countdown states**: together (no timer — it used to keep ticking),
   counting (with the target shown as e.g. "Sun, Oct 4 at 6:30 PM" and a
-  Change button that replaces it), the day is here, and nothing planned.
-  Both apps also show today's date. The widget mirrors these states and gets
-  a timeline entry at the meetup moment.
+  Change button that replaces it), "have you met up?" once it runs out
+  (§7.3), and nothing planned. The countdown shows days, hours, minutes, and
+  seconds and is redrawn every second. Both apps also show today's date. The
+  widget mirrors these states (§6).
 - **Calendar** (both apps): a month grid with markers for visits and
   important dates, tap a day to see it, an upcoming list with "Today / in N
   days" countdowns (past items separately, below), add and delete.
@@ -1094,8 +1122,9 @@ two-column layout. Identity is an email + password account shared with the
 iPhone app (§5.3 note), so one person can use both at once. Two
 behaviours were once fixed only on web: leaving counting down to the next
 planned visit, and a yearly date that falls today reading "Today". Both
-now live in the shared Swift logic as well (§7.5). Milestone celebrations
-are iPhone-only.
+now live in the shared Swift logic as well (§7.5). The reunion
+celebration after "Have you met up?" is on both clients (§7.3); round-number
+milestones are iPhone-only.
 
 **Distribution (supersedes §2's original plan):** the build and verify
 loop runs entirely on GitHub Actions, with no local Xcode. `project.yml`
@@ -1135,6 +1164,8 @@ it hasn't been confirmed on a physical iPhone yet.
 9. The web client (above).
 10. "Thinking of you" delivery: the card in both clients and the widget line
     (§7.1).
+11. The days/hours/minutes/seconds countdown, and "Have you met up?" before
+    any celebration (§7.3).
 
 **Next:**
 
@@ -1143,5 +1174,5 @@ it hasn't been confirmed on a physical iPhone yet.
    Apple ID signing, as the §10 spike intended.
 2. Surface the `BGAppRefreshTask` firing log, for example in Settings, so
    §10's keep-or-drop threshold can be evaluated with real data.
-3. Optional: milestone celebrations on web, leaving a pairing after both
+3. Optional: round-number milestone celebrations on web, leaving a pairing after both
    partners have joined, and a per-couple (shared) theme.

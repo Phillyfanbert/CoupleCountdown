@@ -16,6 +16,11 @@ struct CountdownView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var celebrationMessage: String?
+    /// The "have you met up?" alert, shown once per meetup on this device
+    /// when its countdown runs out.
+    @State private var isAskingMetUp = false
+    @AppStorage("metUpAskedFor") private var metUpAskedFor: Double = 0
+    @AppStorage("metUpNotYetFor") private var metUpNotYetFor: Double = 0
     @State private var isConfirmingCancel = false
     @State private var cancelError: String?
 
@@ -133,10 +138,28 @@ struct CountdownView: View {
                 pings.stopListening()
             }
         }
-        .onChange(of: sync.state) { _, newState in
+        .onChange(of: sync.state) { oldState, newState in
             guard let newState else { return }
+            // Your partner said you've met: the congratulations reach you too.
+            if oldState?.status == .apart, newState.status == .together, newState.lastUpdatedBy != uid {
+                let name = newState.partnerProfiles[newState.lastUpdatedBy]?.displayName ?? "Your partner"
+                celebrationMessage = "\(name) says you're together! Congratulations 💞"
+            }
             Task { await checkForMilestones(state: newState) }
             Task { await ensureOwnProfile(state: newState) }
+        }
+        .task(id: arrivalWatchKey) {
+            await askWhenCountdownEnds()
+        }
+        .alert("The countdown's done! ⏰", isPresented: $isAskingMetUp) {
+            Button("Yes, we're together!") {
+                if let state = sync.state { Task { await toggleStatus(state: state) } }
+            }
+            Button("Not yet", role: .cancel) {
+                if let state = sync.state { metUpNotYetFor = meetupKey(state) }
+            }
+        } message: {
+            Text("Have you two met up?")
         }
         .sheet(isPresented: Binding(
             get: { viewModel.visitSheetPurpose != nil },
@@ -153,7 +176,9 @@ struct CountdownView: View {
                 // overlay was reliably gone before a test ever got around
                 // to checking for it. A longer delay only under the test
                 // flag fixes the race without touching real UX timing.
-                let autoDismissDelay: Duration = ProcessInfo.processInfo.arguments.contains("-uiTestForceCelebration") ? .seconds(30) : .seconds(4)
+                let arguments = ProcessInfo.processInfo.arguments
+                let autoDismissDelay: Duration = arguments.contains("-uiTestForceCelebration") || arguments.contains("-uiTestLongCelebration")
+                    ? .seconds(30) : .seconds(4)
                 MilestoneCelebrationView(message: celebrationMessage, autoDismissDelay: autoDismissDelay) {
                     self.celebrationMessage = nil
                 }
@@ -190,9 +215,9 @@ struct CountdownView: View {
                 if state.participantUIDs.count < 2 {
                     waitingForPartnerCard
                 }
-                // Re-evaluated every 30s so the card switches from the
-                // countdown to "the day is here" when the meetup arrives.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                // Redrawn every second: the digits stay current, and the card
+                // switches to asking whether you've met the moment it ends.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
                     countdownCard(state: state, now: context.date)
                 }
                 statusBadge(state: state)
@@ -301,16 +326,12 @@ struct CountdownView: View {
                 Text("Enjoy every minute.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-            } else if let nextMeetupDate = state.nextMeetupDate, nextMeetupDate > now {
+            } else if let nextMeetupDate = state.nextMeetupDate,
+                      let parts = CountdownFormatter.parts(until: nextMeetupDate, from: now) {
                 Text("Until we're together again")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text(timerInterval: CountdownFormatter.timerInterval(to: nextMeetupDate), countsDown: true)
-                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                    .contentTransition(.numericText())
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("countdownText")
+                CountdownUnitsView(parts: parts, accentColor: theme.accentColor)
                 Text(nextMeetupDate, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -319,17 +340,44 @@ struct CountdownView: View {
                     .font(.footnote)
                     .accessibilityIdentifier("changeMeetupButton")
             } else if state.nextMeetupDate != nil {
-                Text("🎉").font(.largeTitle)
-                Text("The day is here")
+                // The countdown's done. Ask before celebrating — it used to
+                // celebrate the instant the timer hit zero, even if the
+                // flight was late.
+                let saidNotYet = metUpNotYetFor == meetupKey(state)
+                Text("⏰").font(.largeTitle)
+                Text("The countdown's done!")
                     .font(.headline)
-                    .accessibilityIdentifier("dayIsHereText")
-                Text("Tap “We're together now” when you meet — or pick a new date if plans changed.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button("Pick a new date") { viewModel.visitSheetPurpose = .plan }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("planVisitButton")
+                    .accessibilityIdentifier("countdownDoneText")
+                Text("Have you two met up?")
+                    .font(.subheadline)
+                    .accessibilityIdentifier("metUpQuestionText")
+                if saidNotYet {
+                    Text("No rush. Tap Yes when you're together, or change the time if plans moved.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                VStack(spacing: 8) {
+                    Button {
+                        Task { await toggleStatus(state: state) }
+                    } label: {
+                        Label("Yes, we're together!", systemImage: "heart.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(theme.accentColor)
+                    .accessibilityIdentifier("metUpYesButton")
+                    if saidNotYet {
+                        Button("Change the time") { viewModel.visitSheetPurpose = .change }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("rescheduleButton")
+                    } else {
+                        Button("Not yet") { metUpNotYetFor = meetupKey(state) }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("metUpNotYetButton")
+                    }
+                }
+                .padding(.top, 4)
             } else {
                 // No-date-set state applies immediately after pairing
                 // too, not just the "leaving again" edge case (§6, §8).
@@ -391,6 +439,9 @@ struct CountdownView: View {
         if state.status == .apart {
             guard await viewModel.markTogether() else { return }
             updated.status = .together
+            // Only now, once someone has said they've met.
+            isAskingMetUp = false
+            celebrationMessage = "Congratulations! You're together again 💞"
         } else {
             // nil means the visit sheet opened (nothing planned) or it failed.
             guard let next = await viewModel.leave() else { return }
@@ -407,7 +458,9 @@ struct CountdownView: View {
         let purpose = viewModel.visitSheetPurpose
         VisitPlannerSheet(
             title: purpose == .change ? "Change the date ✈️" : "When do you see each other next? ✈️",
-            initialStart: purpose == .change ? sync.state?.nextMeetupDate : nil,
+            // A meetup that has already passed (rescheduling after "not
+            // yet") isn't a valid starting point: the picker only allows the future.
+            initialStart: purpose == .change ? sync.state?.nextMeetupDate.flatMap { $0 > Date() ? $0 : nil } : nil,
             errorMessage: viewModel.errorMessage,
             onSave: { start, note in
                 guard let state = sync.state,
@@ -434,18 +487,40 @@ struct CountdownView: View {
         )
     }
 
+    // MARK: - "Have you met up?" (§7.3)
+
+    /// Identifies the meetup being counted down to, for remembering on this
+    /// device that it was already asked about, or answered "not yet".
+    private func meetupKey(_ state: RelationshipState) -> Double {
+        state.nextMeetupDate?.timeIntervalSince1970 ?? 0
+    }
+
+    /// Restarts whenever the status or meetup changes.
+    private var arrivalWatchKey: String {
+        guard let state = sync.state, state.status == .apart, let meetup = state.nextMeetupDate else { return "none" }
+        return "\(meetup.timeIntervalSince1970)"
+    }
+
+    /// Waits for the countdown to run out, then asks — once per meetup on
+    /// this device. Also closes the question if the partner answers first.
+    private func askWhenCountdownEnds() async {
+        guard let state = sync.state, state.status == .apart, let meetup = state.nextMeetupDate else {
+            isAskingMetUp = false
+            return
+        }
+        let wait = meetup.timeIntervalSinceNow
+        if wait > 0 {
+            try? await Task.sleep(for: .seconds(wait))
+        }
+        guard !Task.isCancelled, metUpAskedFor != meetupKey(state) else { return }
+        metUpAskedFor = meetupKey(state)
+        isAskingMetUp = true
+    }
+
     // MARK: - Milestone celebration (§7.3)
 
     private func checkForMilestones(state: RelationshipState) async {
         var celebrated = Set(celebratedMilestonesRaw.split(separator: ",").map(String.init))
-
-        if MilestoneChecker.countdownReachedZero(nextMeetupDate: state.nextMeetupDate, status: state.status) {
-            let key = "zero-\(Int(state.nextMeetupDate?.timeIntervalSince1970 ?? 0))"
-            if !celebrated.contains(key) {
-                celebrated.insert(key)
-                celebrationMessage = "You're together again! 🎉"
-            }
-        }
 
         if let events = try? await firestore.fetchEvents(coupleId: coupleId) {
             let stats = CumulativeStatsCalculator.calculate(events: events)
@@ -453,9 +528,7 @@ struct CountdownView: View {
                 let key = "days-\(milestone)"
                 if !celebrated.contains(key) {
                     celebrated.insert(key)
-                    // Only overwrite the countdown-reached-zero message if
-                    // that one didn't already fire this pass — both firing
-                    // at once is an edge case not worth stacking UI for.
+                    // Don't cover a reunion's congratulations.
                     if celebrationMessage == nil {
                         celebrationMessage = "\(milestone) days together! 🎉"
                     }

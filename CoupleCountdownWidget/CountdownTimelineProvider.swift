@@ -70,22 +70,23 @@ struct CountdownTimelineProvider: TimelineProvider {
             // whatever was already in the cache — never an error state
             // (§5.5 failure-mode behavior).
 
-            let entry = CountdownEntry(date: Date(), state: state, unseenPing: unseenPing)
-            // A second entry at the meetup moment, so the widget switches to
-            // "The day is here" on time instead of sitting at 0:00 until the
-            // next refresh.
-            var entries = [entry]
-            if let state, state.status == .apart, let meetup = state.nextMeetupDate, meetup > entry.date {
-                entries.append(CountdownEntry(date: meetup, state: state, unseenPing: unseenPing))
+            // The widget can't redraw every second, so the countdown is the
+            // whole days as text plus a live Text(timerInterval:) for the rest
+            // of the current day. An entry at each moment the day count drops
+            // (and at the meetup itself, where it switches to asking whether
+            // you've met) keeps it current between refreshes, however late
+            // WidgetKit's next one comes.
+            let now = Date()
+            var dates = [now]
+            if let state, state.status == .apart, let meetup = state.nextMeetupDate {
+                dates = CountdownFormatter.widgetTimelineDates(until: meetup, from: now)
             }
-            // Otherwise one entry — Text(timerInterval:) handles the digit
-            // ticking on its own, so there's no need to pre-generate a
-            // series of future entries. `.after(~30 min)` is a request,
-            // not a guarantee; WidgetKit's actual cadence is still
-            // OS-controlled (§5.2 #4) — `.never` would starve updates,
-            // `.atEnd` with one entry risks hammering the refresh budget
-            // (§6).
-            let nextRefresh = Date().addingTimeInterval(30 * 60)
+            let entries = dates.map { CountdownEntry(date: $0, state: state, unseenPing: unseenPing) }
+            // `.after(~30 min)` is a request, not a guarantee; WidgetKit's
+            // actual cadence is still OS-controlled (§5.2 #4) — `.never`
+            // would starve updates, `.atEnd` risks hammering the refresh
+            // budget (§6).
+            let nextRefresh = now.addingTimeInterval(30 * 60)
             completion(Timeline(entries: entries, policy: .after(nextRefresh)))
         }
     }

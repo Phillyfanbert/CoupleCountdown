@@ -25,8 +25,8 @@ the same account and data.
 
 The CI runs these tests on every push:
 
-- 15 XCUITest UI tests against the live backend;
-- 25 unit tests;
+- 16 XCUITest UI tests against the live backend;
+- 28 unit tests;
 - 31 Security Rules tests;
 - the web client's date logic, checked in five time zones.
 
@@ -89,9 +89,15 @@ below.
 
 ## Features
 
-- **Live countdown to the next visit** to the minute you actually meet,
-  not just the day. It ticks in the app, on the web, and in iPhone Home
-  Screen and Lock Screen widgets.
+- **Live countdown to the next visit** in days, hours, minutes, and
+  seconds, to the minute you actually meet rather than just the day. It
+  ticks every second in the app and on the web. The iPhone Home Screen and
+  Lock Screen widgets show the days plus a live hours:minutes:seconds
+  timer.
+- **"Have you met up?"** When the countdown runs out, the app asks, and the
+  congratulations and confetti come only after one of you says yes. If
+  your partner's app is open, they're congratulated too. "Not yet" keeps
+  the question on screen and lets you move the time.
 - **Shared calendar:** plan any number of visits, each with a date, a time,
   and an optional note, and see them on a month grid. The countdown and
   widget always follow the next planned visit, so tapping "Leaving again"
@@ -106,8 +112,8 @@ below.
   or send one back from any of their devices.
 - **Stats:** total days together and apart, derived from that log.
 - **Each partner's current local time** alongside the countdown.
-- **Milestone celebrations** when a countdown reaches zero or a round
-  number of days together (iPhone app).
+- **Milestone celebrations** for round numbers of days together (iPhone
+  app).
 - **Themes** with light and dark variants.
 - **Email + password accounts:** one account works on all your devices. No
   phone numbers, no Apple ID requirement.
@@ -119,7 +125,7 @@ below.
   when the other person opens the app or the widget next refreshes.
 - **Themes are per device**, not shared between partners.
 - **The web app** has no widget, which a website can't provide, and no
-  milestone celebrations.
+  round-number milestone celebrations.
 - **Real-device install** hasn't been confirmed on a physical iPhone yet
   (see [Status](#status)).
 

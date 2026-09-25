@@ -135,6 +135,20 @@ label.check input { width: 20px; height: 20px; accent-color: var(--accent); }
 .swatch[aria-pressed="true"] { border-color: var(--accent); }
 .dot { width: 22px; height: 22px; border-radius: 50%; }
 
+/* The reunion celebration: a card that takes taps, and confetti that doesn't. */
+.celebration { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; pointer-events: none; overflow: hidden; background: rgba(0, 0, 0, 0.18); animation: fade-in 0.3s ease-out; }
+.celebration-card {
+  pointer-events: auto; cursor: pointer; text-align: center; max-width: 360px;
+  background: var(--bg2); color: var(--ink); border-radius: var(--radius); padding: 28px 32px;
+  box-shadow: 0 30px 60px -20px rgba(0,0,0,0.5); animation: pop 0.35s ease-out;
+}
+.celebration-card h2 { margin: 8px 0 0; }
+.confetti { position: absolute; top: -8vh; font-size: 1.8rem; animation: confetti-fall 2.8s ease-in forwards; }
+@keyframes confetti-fall { to { transform: translateY(116vh) rotate(var(--spin, 180deg)); opacity: 0.3; } }
+@keyframes pop { from { transform: scale(0.85); opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .celebration, .celebration-card { animation: none; } }
+
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; padding: 18px; z-index: 10; }
 .modal { width: min(440px, 100%); background: var(--bg2); color: var(--ink); border-radius: var(--radius); padding: 22px; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.5); }
 

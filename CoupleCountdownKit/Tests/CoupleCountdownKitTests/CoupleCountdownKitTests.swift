@@ -123,6 +123,43 @@ final class RelativeDayTests: XCTestCase {
     }
 }
 
+final class CountdownPartsTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testSplitsIntoDaysHoursMinutesSecondsAndStopsAtZero() {
+        // Same case as countdownParts in web/logic.test.js.
+        let target = start.addingTimeInterval(2 * 86_400 + 3 * 3_600 + 4 * 60 + 5)
+        XCTAssertEqual(CountdownFormatter.parts(until: target, from: start), .init(days: 2, hours: 3, minutes: 4, seconds: 5))
+        XCTAssertEqual(CountdownFormatter.parts(until: target, from: start.addingTimeInterval(0.4)), .init(days: 2, hours: 3, minutes: 4, seconds: 4))
+        XCTAssertNil(CountdownFormatter.parts(until: start, from: start))
+        XCTAssertNil(CountdownFormatter.parts(until: start, from: target))
+    }
+
+    func testWidgetDayCountsWholeDaysAndEndsTheTimerAtTheNextBoundary() {
+        let target = start.addingTimeInterval(2 * 86_400 + 3 * 3_600)
+        let now = CountdownFormatter.widgetDay(until: target, from: start)
+        XCTAssertEqual(now?.days, 2)
+        XCTAssertEqual(now?.dayEnds, start.addingTimeInterval(3 * 3_600))
+        // Exactly on a boundary, a full day of timer is left, not 0:00.
+        let onBoundary = CountdownFormatter.widgetDay(until: target, from: target.addingTimeInterval(-86_400))
+        XCTAssertEqual(onBoundary?.days, 0)
+        XCTAssertEqual(onBoundary?.dayEnds, target)
+        XCTAssertNil(CountdownFormatter.widgetDay(until: target, from: target))
+    }
+
+    func testWidgetTimelineHasAnEntryEachTimeTheDayCountDrops() {
+        let target = start.addingTimeInterval(2 * 86_400 + 3 * 3_600)
+        XCTAssertEqual(CountdownFormatter.widgetTimelineDates(until: target, from: start), [
+            start,
+            start.addingTimeInterval(3 * 3_600),
+            start.addingTimeInterval(86_400 + 3 * 3_600),
+            target,
+        ])
+        XCTAssertEqual(CountdownFormatter.widgetTimelineDates(until: target, from: start, limit: 2).count, 2)
+        XCTAssertEqual(CountdownFormatter.widgetTimelineDates(until: start, from: target), [target])
+    }
+}
+
 final class CumulativeStatsCalculatorTests: XCTestCase {
     func testEmptyEventsProduceZeroStats() {
         let stats = CumulativeStatsCalculator.calculate(events: [])

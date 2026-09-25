@@ -32,9 +32,11 @@ final class CoupleCountdownUITests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func launchFreshApp(forceCelebration: Bool = false) -> XCUIApplication {
+    private func launchFreshApp(forceCelebration: Bool = false, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        var args = ["-uiTestReset"]
+        // Long celebration: it stays until a test taps it away, rather than
+        // vanishing on a 4-second timer somewhere mid-assertion.
+        var args = ["-uiTestReset", "-uiTestLongCelebration"] + extraArguments
         if forceCelebration {
             args.append("-uiTestForceCelebration")
         }
@@ -157,6 +159,16 @@ final class CoupleCountdownUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
         }
         XCTFail("\(element) never became tappable", file: file, line: line)
+    }
+
+    /// Saying you're together celebrates; the overlay has to be tapped away
+    /// before it can sit over the next button a test taps.
+    private func dismissCelebration(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let celebration = app.descendants(matching: .any)["milestoneCelebration"]
+        XCTAssertTrue(celebration.waitForExistence(timeout: 10), "Saying you're together should celebrate", file: file, line: line)
+        XCTAssertTrue(celebration.label.contains("Congratulations"), "Unexpected celebration: \(celebration.label)", file: file, line: line)
+        celebration.tap()
+        XCTAssertTrue(waitForNonExistence(of: celebration, timeout: 5), file: file, line: line)
     }
 
     private func signIn(_ app: XCUIApplication, email: String, password: String) {
@@ -317,6 +329,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let becameTogether = NSPredicate(format: "label CONTAINS %@", "Together right now")
         expectation(for: becameTogether, evaluatedWith: badge, handler: nil)
         waitForExpectations(timeout: 10)
+        dismissCelebration(app)
 
         // Together -> apart with no date queued should prompt for one
         // rather than silently failing (CountdownViewModel.toggleStatus).
@@ -326,10 +339,45 @@ final class CoupleCountdownUITests: XCTestCase {
         let saveDateButton = app.buttons["saveDateButton"]
         XCTAssertTrue(saveDateButton.waitForExistence(timeout: 10), "Leaving again with nothing planned should ask when you'll see each other next")
         // Accept the sheet's default (a week from today, 6 PM).
-        let countdownText = app.staticTexts["countdownText"]
-        tap(saveDateButton, until: countdownText, in: app)
-        XCTAssertTrue(countdownText.exists, "Saving a visit should dismiss the sheet and show a live countdown")
+        let countdownSeconds = app.staticTexts["countdownSeconds"]
+        tap(saveDateButton, until: countdownSeconds, in: app)
+        XCTAssertTrue(countdownSeconds.exists, "Saving a visit should dismiss the sheet and show a live countdown")
         XCTAssertTrue(app.staticTexts["meetupTargetText"].exists, "The countdown should say what it's counting down to")
+    }
+
+    func testCountdownTicksThenAsksIfYouMetBeforeCelebrating() {
+        // The countdown shows days, hours, minutes, and seconds and stays
+        // current; when it runs out it asks whether you've met, and the
+        // congratulations come only after a yes. (-uiTestQuickVisit makes
+        // the new visit's default start within about a minute.)
+        let app = launchFreshApp(extraArguments: ["-uiTestQuickVisit"])
+        completeOnboardingByCreating(app)
+
+        tap(app.buttons["planVisitButton"], until: app.buttons["saveDateButton"], in: app)
+        let seconds = app.staticTexts["countdownSeconds"]
+        tap(app.buttons["saveDateButton"], until: seconds, in: app)
+        for unit in ["countdownDays", "countdownHours", "countdownMinutes"] {
+            XCTAssertTrue(app.staticTexts[unit].exists, "The countdown should show \(unit)")
+        }
+        let before = seconds.label
+        Thread.sleep(forTimeInterval: 2.5)
+        XCTAssertNotEqual(seconds.label, before, "The seconds should tick")
+
+        let question = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "The countdown's done")).firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 100), "When the countdown runs out it should ask whether you've met up")
+        let celebration = app.descendants(matching: .any)["milestoneCelebration"]
+        XCTAssertFalse(celebration.exists, "No celebration before anyone says you've met")
+        question.buttons["Not yet"].tap()
+
+        // "Not yet" keeps asking on the card, and offers to move the time.
+        let yes = app.buttons["metUpYesButton"]
+        XCTAssertTrue(yes.waitForExistence(timeout: 10), "The card should keep asking after \"not yet\"")
+        XCTAssertTrue(app.buttons["rescheduleButton"].exists, "After \"not yet\" you can change the time")
+        XCTAssertFalse(celebration.exists, "Still no celebration after \"not yet\"")
+
+        tapWhenReady(yes, in: app)
+        dismissCelebration(app)
+        XCTAssertTrue(app.staticTexts["togetherText"].waitForExistence(timeout: 10), "Saying yes should mark you together")
     }
 
     func testLeavingAgainCountsDownToThePlannedVisit() {
@@ -341,18 +389,19 @@ final class CoupleCountdownUITests: XCTestCase {
         completeOnboardingByCreating(app)
 
         tap(app.buttons["planVisitButton"], until: app.buttons["saveDateButton"], in: app)
-        let countdownText = app.staticTexts["countdownText"]
-        tap(app.buttons["saveDateButton"], until: countdownText, in: app)
+        let countdownSeconds = app.staticTexts["countdownSeconds"]
+        tap(app.buttons["saveDateButton"], until: countdownSeconds, in: app)
         let target = app.staticTexts["meetupTargetText"]
         XCTAssertTrue(target.waitForExistence(timeout: 5))
         let plannedLabel = target.label
 
         let toggle = app.buttons["toggleStatusButton"]
         tap(toggle, until: app.staticTexts["togetherText"], in: app) // together
-        XCTAssertFalse(countdownText.exists, "Together should replace the countdown, not keep ticking")
+        dismissCelebration(app)
+        XCTAssertFalse(countdownSeconds.exists, "Together should replace the countdown, not keep ticking")
 
         tapWhenReady(toggle, in: app) // leaving again
-        XCTAssertTrue(countdownText.waitForExistence(timeout: 15), "Leaving again should count down to the planned visit")
+        XCTAssertTrue(countdownSeconds.waitForExistence(timeout: 15), "Leaving again should count down to the planned visit")
         XCTAssertFalse(app.buttons["saveDateButton"].exists, "With a visit already planned, leaving shouldn't ask again")
         XCTAssertEqual(target.label, plannedLabel)
     }
@@ -369,7 +418,7 @@ final class CoupleCountdownUITests: XCTestCase {
 
         // The main countdown follows the plan.
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.staticTexts["countdownText"].waitForExistence(timeout: 15), "The countdown should follow the newly planned visit")
+        XCTAssertTrue(app.staticTexts["countdownSeconds"].waitForExistence(timeout: 15), "The countdown should follow the newly planned visit")
     }
 
     // MARK: - Important Dates ("calendar" feature)

@@ -35,7 +35,16 @@ struct VisitPlannerSheet: View {
         self.errorMessage = errorMessage
         self.onSave = onSave
         self.onCancel = onCancel
-        _start = State(initialValue: initialStart ?? Self.defaultStart())
+        _start = State(initialValue: initialStart ?? (Self.isQuickVisitTest ? Self.quickTestStart() : Self.defaultStart()))
+    }
+
+    /// UI tests only: a visit starting within about a minute, so a test can
+    /// watch a real countdown run out. (The start is kept on a whole minute,
+    /// since saved visits are trimmed to the minute.)
+    private static let isQuickVisitTest = ProcessInfo.processInfo.arguments.contains("-uiTestQuickVisit")
+
+    static func quickTestStart(now: Date = Date()) -> Date {
+        Date(timeIntervalSince1970: ((now.timeIntervalSince1970 + 20) / 60).rounded(.up) * 60)
     }
 
     /// A week from today at 6 PM — computed each time the sheet opens, not

@@ -12,8 +12,9 @@ public enum MilestoneChecker {
     public static let roundDayMilestones = [7, 30, 100, 365, 500, 1000]
 
     /// True once the countdown target has passed while still "apart" —
-    /// the moment worth celebrating even before either partner has
-    /// tapped the status toggle yet.
+    /// the moment to *ask* whether they've met. The celebration waits for a
+    /// yes: celebrating the instant the timer hit zero congratulated
+    /// couples whose flight was late.
     public static func countdownReachedZero(
         nextMeetupDate: Date?,
         status: RelationshipState.Status,

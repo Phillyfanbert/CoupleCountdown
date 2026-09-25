@@ -21,13 +21,48 @@ public enum CountdownFormatter {
         }
     }
 
-    /// The date range to hand to SwiftUI's `Text(timerInterval:countsDown:)`
-    /// — the OS handles the actual digit ticking from this, so this just
-    /// needs to be a valid, stable interval (DESIGN.md §6).
-    public static func timerInterval(to targetDate: Date, from now: Date = Date()) -> ClosedRange<Date> {
-        let start = min(now, targetDate)
-        let end = max(now, targetDate)
-        return start...end
+    /// Whole days, hours, minutes, and seconds left — what the countdown
+    /// shows. Mirrors countdownParts in web/logic.js.
+    public struct Parts: Equatable, Sendable {
+        public var days: Int
+        public var hours: Int
+        public var minutes: Int
+        public var seconds: Int
+    }
+
+    /// Time left until `target`, or nil once it has arrived.
+    public static func parts(until target: Date, from now: Date = Date()) -> Parts? {
+        let remaining = target.timeIntervalSince(now)
+        guard remaining > 0 else { return nil }
+        let total = Int(remaining.rounded(.down))
+        return Parts(days: total / 86_400, hours: total % 86_400 / 3_600, minutes: total % 3_600 / 60, seconds: total % 60)
+    }
+
+    /// For the widget, which can't redraw every second: the whole days left
+    /// (drawn as text) and when the current partial day runs out (the end of
+    /// a live `Text(timerInterval:)` showing the hours, minutes, and seconds).
+    /// Exactly on a day boundary the new day counts as partial, so the timer
+    /// runs a full 24 hours instead of sitting at 0:00 — a half-second
+    /// tolerance keeps floating-point noise from tipping that the wrong way.
+    public static func widgetDay(until target: Date, from now: Date) -> (days: Int, dayEnds: Date)? {
+        let remaining = target.timeIntervalSince(now)
+        guard remaining > 0 else { return nil }
+        let days = max(0, Int(((remaining - 0.5) / 86_400).rounded(.up)) - 1)
+        return (days, target.addingTimeInterval(-Double(days) * 86_400))
+    }
+
+    /// When the widget's timeline needs an entry: now, each moment the day
+    /// count drops, and the target itself (where it switches to asking
+    /// whether they've met). Capped at `limit` entries; the widget reloads
+    /// long before it runs out.
+    public static func widgetTimelineDates(until target: Date, from now: Date, limit: Int = 32) -> [Date] {
+        var dates = [now]
+        var cursor = now
+        while dates.count < limit, let day = widgetDay(until: target, from: cursor) {
+            cursor = day.dayEnds
+            dates.append(cursor)
+        }
+        return dates
     }
 
     /// "Her: 9:14 PM CDT" style formatting for a partner's current local

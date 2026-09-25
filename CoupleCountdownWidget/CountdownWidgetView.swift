@@ -29,6 +29,35 @@ struct CountdownWidgetView: View {
         .widgetURL(URL(string: "couplecountdown://open"))
     }
 
+    /// Whole days as text (redrawn by the timeline entry at each day
+    /// boundary) and the hours, minutes, and seconds of the current day as
+    /// a live timer the system ticks by itself.
+    @ViewBuilder
+    private func countdownText(days: Int, timer: ClosedRange<Date>) -> some View {
+        let dayLabel = days == 1 ? "1 day" : "\(days) days"
+        switch family {
+        case .accessoryInline:
+            Text("\(days)d ") + Text(timerInterval: timer, countsDown: true)
+        case .accessoryCircular:
+            VStack(spacing: 0) {
+                Text("\(days)d").font(.system(.headline, design: .rounded))
+                Text(timerInterval: timer, countsDown: true)
+                    .font(.system(.caption2, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.6)
+            }
+        default:
+            VStack(spacing: 2) {
+                Text(dayLabel)
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                Text(timerInterval: timer, countsDown: true)
+                    .font(.system(.title3, design: .rounded))
+                    .monospacedDigit()
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
     /// The circular and inline Lock Screen widgets have no room for a
     /// second line.
     private var showsPing: Bool {
@@ -44,12 +73,15 @@ struct CountdownWidgetView: View {
             if state.status == .together {
                 Text("Together 💞")
                     .font(.system(.title3, design: .rounded, weight: .semibold))
-            } else if let nextMeetupDate = state.nextMeetupDate, nextMeetupDate > entry.date {
-                Text(timerInterval: CountdownFormatter.timerInterval(to: nextMeetupDate), countsDown: true)
-                    .font(.system(.title3, design: .rounded))
+            } else if let nextMeetupDate = state.nextMeetupDate,
+                      let day = CountdownFormatter.widgetDay(until: nextMeetupDate, from: entry.date) {
+                countdownText(days: day.days, timer: entry.date...day.dayEnds)
             } else if state.nextMeetupDate != nil {
-                Text("The day is here 🎉")
+                // Countdown's done: ask, don't celebrate — the app celebrates
+                // once someone says yes. Tapping opens the app to answer.
+                Text(family == .accessoryInline ? "⏰ Have you met up?" : "⏰ Have you met up? 💞")
                     .font(.system(.headline, design: .rounded))
+                    .multilineTextAlignment(.center)
             } else {
                 // No-date-set empty state applies right after pairing
                 // too, not just the "leaving again" edge case (§6, §8).
