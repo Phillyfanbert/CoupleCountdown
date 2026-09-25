@@ -12,6 +12,7 @@ struct CountdownView: View {
 
     @StateObject private var sync: SyncCoordinator
     @StateObject private var viewModel: CountdownViewModel
+    @StateObject private var pings: PingInbox
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @State private var celebrationMessage: String?
@@ -45,6 +46,13 @@ struct CountdownView: View {
             widgetKind: "CountdownWidget"
         ))
         _viewModel = StateObject(wrappedValue: CountdownViewModel(firestore: firestore, coupleId: coupleId, uid: uid))
+        _pings = StateObject(wrappedValue: PingInbox(
+            firestore: firestore,
+            cache: AppGroupCache(suiteName: SharedIdentifiers.appGroup),
+            coupleId: coupleId,
+            uid: uid,
+            widgetKind: "CountdownWidget"
+        ))
     }
 
     var body: some View {
@@ -112,14 +120,17 @@ struct CountdownView: View {
             // while both apps are open) engage on a fresh launch instead
             // of only after a background/foreground cycle.
             sync.startListening()
+            pings.startListening()
             await sync.fetchOnLaunch()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 sync.startListening()
+                pings.startListening()
                 Task { await sync.fetchOnLaunch() }
             } else {
                 sync.stopListening()
+                pings.stopListening()
             }
         }
         .onChange(of: sync.state) { _, newState in
@@ -162,6 +173,20 @@ struct CountdownView: View {
             }
 
             if let state = sync.state {
+                // What the partner sees when you tap "thinking of you" —
+                // it used to be sent and never shown anywhere.
+                if let newest = pings.unseen.first {
+                    ReceivedPingCard(
+                        pings: pings.unseen,
+                        senderName: state.partnerProfiles[newest.sentBy]?.displayName,
+                        accentColor: theme.accentColor,
+                        onSendBack: {
+                            try await firestore.sendPing(coupleId: coupleId, uid: uid)
+                            try await pings.markAllSeen()
+                        },
+                        onDismiss: { try await pings.markAllSeen() }
+                    )
+                }
                 if state.participantUIDs.count < 2 {
                     waitingForPartnerCard
                 }

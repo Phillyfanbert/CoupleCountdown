@@ -1,4 +1,4 @@
-// CountdownTimelineProvider.swift — single-entry, ~30-min-policy timeline provider (DESIGN.md §6 "Timeline provider entries/policy")
+// CountdownTimelineProvider.swift — ~30-min-policy timeline provider (DESIGN.md §6 "Timeline provider entries/policy")
 
 import WidgetKit
 import CoupleCountdownKit
@@ -6,6 +6,8 @@ import CoupleCountdownKit
 struct CountdownEntry: TimelineEntry {
     let date: Date
     let state: RelationshipState?
+    /// The newest "thinking of you" from the partner not yet seen (§7.1).
+    var unseenPing: ThinkingOfYouPing? = nil
 }
 
 struct CountdownTimelineProvider: TimelineProvider {
@@ -15,20 +17,23 @@ struct CountdownTimelineProvider: TimelineProvider {
     // neither is a secret (DESIGN.md §5.7 discussion, Firebase's own docs:
     // the Web API key is a public identifier, not a credential; access
     // control comes entirely from the tested Security Rules).
-    private let client = WidgetFirestoreClient(
-        projectId: "couplecountdown-7715c",
-        tokenProvider: WidgetAuthTokenProvider(apiKey: "AIzaSyCCo8NgjVwz6-P1lW6H1CKqGadyKwSA384")
-    )
+    private let client = WidgetFirestoreClient(projectId: "couplecountdown-7715c")
+    private let tokenProvider = WidgetAuthTokenProvider(apiKey: "AIzaSyCCo8NgjVwz6-P1lW6H1CKqGadyKwSA384")
 
     func placeholder(in context: Context) -> CountdownEntry {
         // First-run empty state: no cache yet if the widget's added
         // before pairing completes (§6) — `state` being nil here is
         // exactly that case, not an error.
-        CountdownEntry(date: Date(), state: cachedStateIfPaired())
+        cachedEntry()
     }
 
     func getSnapshot(in context: Context, completion: @escaping (CountdownEntry) -> Void) {
-        completion(CountdownEntry(date: Date(), state: cachedStateIfPaired()))
+        completion(cachedEntry())
+    }
+
+    private func cachedEntry() -> CountdownEntry {
+        let state = cachedStateIfPaired()
+        return CountdownEntry(date: Date(), state: state, unseenPing: state == nil ? nil : cache.readUnseenPing())
     }
 
     /// The app removes the App Group coupleId on sign-out and when the
@@ -48,22 +53,30 @@ struct CountdownTimelineProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<CountdownEntry>) -> Void) {
         Task {
             var state = cachedStateIfPaired()
-            if let coupleId = currentCoupleId,
-               let fresh = await client.fetchRelationshipState(coupleId: coupleId) {
-                state = fresh
-                cache.write(fresh)
+            var unseenPing = state == nil ? nil : cache.readUnseenPing()
+            if let coupleId = currentCoupleId, let session = await tokenProvider.fetchSession() {
+                if let fresh = await client.fetchRelationshipState(coupleId: coupleId, session: session) {
+                    state = fresh
+                    cache.write(fresh)
+                }
+                // Without push, the widget is how a partner who hasn't
+                // opened the app finds out someone's thinking of them.
+                if let pings = await client.fetchRecentPings(coupleId: coupleId, session: session) {
+                    unseenPing = ThinkingOfYouPing.unseen(pings, for: session.uid).first
+                    cache.writeUnseenPing(unseenPing)
+                }
             }
-            // If the fetch failed for any reason, `state` just stays
+            // If a fetch failed for any reason, its value just stays
             // whatever was already in the cache — never an error state
             // (§5.5 failure-mode behavior).
 
-            let entry = CountdownEntry(date: Date(), state: state)
+            let entry = CountdownEntry(date: Date(), state: state, unseenPing: unseenPing)
             // A second entry at the meetup moment, so the widget switches to
             // "The day is here" on time instead of sitting at 0:00 until the
             // next refresh.
             var entries = [entry]
             if let state, state.status == .apart, let meetup = state.nextMeetupDate, meetup > entry.date {
-                entries.append(CountdownEntry(date: meetup, state: state))
+                entries.append(CountdownEntry(date: meetup, state: state, unseenPing: unseenPing))
             }
             // Otherwise one entry — Text(timerInterval:) handles the digit
             // ticking on its own, so there's no need to pre-generate a

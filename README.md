@@ -25,9 +25,9 @@ the same account and data.
 
 The CI runs these tests on every push:
 
-- 14 XCUITest UI tests against the live backend;
-- 19 unit tests;
-- 29 Security Rules tests;
+- 15 XCUITest UI tests against the live backend;
+- 25 unit tests;
+- 31 Security Rules tests;
 - the web client's date logic, checked in five time zones.
 
 The full architecture, decisions, and rationale live in
@@ -44,7 +44,7 @@ has only been exercised in the Simulator so far. See
 **<https://couplecountdown-7715c.web.app>**. On a phone, use Share → *Add to
 Home Screen* for an app-style icon. The web version has the core
 experience: pairing, the live countdown, apart/together, the calendar of
-visits and important dates, stats, and themes. It syncs with the iPhone app
+visits and important dates, "thinking of you" nudges, stats, and themes. It syncs with the iPhone app
 through the same backend and join codes, but as a website it can't provide
 a Home Screen or Lock Screen widget.
 
@@ -71,8 +71,10 @@ the phone itself.
 **Accounts:** sign up once with an email and password, then sign in with
 the same account on as many devices as you like: the iPhone app, your
 phone's browser, your computer. Every one shows the same countdown. Your
-partner makes their own account and joins with your code. A pairing is
-always exactly two people, but each of you can use any number of devices.
+partner makes their own account and joins with your code. A code doesn't
+expire: it keeps working until your partner joins with it or you cancel it.
+A pairing is always exactly two people, but each of you can use any number
+of devices.
 
 ## Why this project
 
@@ -99,6 +101,9 @@ below.
   partners, whatever their time zones.
 - **Apart / together toggle**, synced between both partners, with every
   change recorded in an append-only history log.
+- **"Thinking of you":** one tap sends your partner a nudge. It appears on
+  their countdown screen, and on their iPhone widget, until they dismiss it
+  or send one back from any of their devices.
 - **Stats:** total days together and apart, derived from that log.
 - **Each partner's current local time** alongside the countdown.
 - **Milestone celebrations** when a countdown reaches zero or a round
@@ -109,15 +114,9 @@ below.
 
 ### Known gaps
 
-- **"Thinking of you"** nudges are sent and stored, but neither app shows
-  received ones yet, so for now the partner never sees them.
-- **Join codes don't expire yet.** The app records a 48-hour expiry, but
-  nothing enforces it: there's no Firestore TTL policy configured and no
-  rules check. A code stops working once your partner joins or you cancel
-  it.
 - **No push notifications, by design:** they'd need the paid Apple
-  Developer Program. A partner's change shows up when the other person
-  opens the app or the widget next refreshes.
+  Developer Program. A partner's change, or a "thinking of you", shows up
+  when the other person opens the app or the widget next refreshes.
 - **Themes are per device**, not shared between partners.
 - **The web app** has no widget, which a website can't provide, and no
   milestone celebrations.

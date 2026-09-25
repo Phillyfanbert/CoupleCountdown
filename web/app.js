@@ -29,8 +29,11 @@ import {
   nextOccurrence,
   nextUpcoming,
   parseLocalISODate,
+  pingHeadline,
   relativeDayLabel,
   resolvedNextMeetup,
+  timeAgo,
+  unseenPings,
 } from "./logic.js";
 
 const fbApp = initializeApp(firebaseConfig);
@@ -75,8 +78,10 @@ const S = {
   plan: { visits: [], dates: [], loaded: false, error: null }, // visits + important dates
   calMonth: null, // { y, m } shown on the Calendar tab
   calSelected: null, // "YYYY-MM-DD" selected on the Calendar tab
+  pings: { all: [], dismissed: new Set(), unseen: [], error: null }, // the partner's "thinking of you"s
   unsubProfile: null,
   unsubCouple: null,
+  unsubPings: null,
   busy: false,
   creating: false,
   createError: null,
@@ -148,8 +153,16 @@ function boot() {
 
 function endSession() {
   S.unsubProfile?.();
+  stopCoupleListeners();
+  Object.assign(S, { unsubProfile: null, user: null, api: null, name: "", coupleId: "", couple: null, loadError: null });
+}
+
+function stopCoupleListeners() {
   S.unsubCouple?.();
-  Object.assign(S, { unsubProfile: null, unsubCouple: null, user: null, api: null, name: "", coupleId: "", couple: null, loadError: null });
+  S.unsubPings?.();
+  S.unsubCouple = null;
+  S.unsubPings = null;
+  S.pings = { all: [], dismissed: new Set(), unseen: [], error: null };
 }
 
 function startSession(user) {
@@ -198,8 +211,7 @@ function onProfile(snap) {
     return;
   }
   S.coupleId = "";
-  S.unsubCouple?.();
-  S.unsubCouple = null;
+  stopCoupleListeners();
   S.couple = null;
   let step = S.step;
   if (!S.name) step = "name";
@@ -453,6 +465,7 @@ function enterMain() {
   S.plan = { visits: [], dates: [], loaded: false, error: null };
   renderShell();
   listen();
+  listenPings();
   loadPlan();
 }
 
@@ -482,6 +495,37 @@ function listen() {
       if (S.tab === "home" || S.tab === "settings") renderTab();
     },
   );
+}
+
+/** The partner's pings, live — it's how "thinking of you" reaches them. */
+function listenPings() {
+  S.unsubPings?.();
+  S.pings = { all: [], dismissed: new Set(), unseen: [], error: null };
+  S.unsubPings = S.api.watchRecentPings(S.coupleId, (pings) => {
+    S.pings.all = pings;
+    refreshPings();
+  }, (e) => console.error("Ping listener failed", e));
+}
+
+function refreshPings() {
+  const unseen = unseenPings(S.pings.all, S.user?.uid).filter((p) => !S.pings.dismissed.has(p.id));
+  const changed = unseen.map((p) => p.id).join() !== S.pings.unseen.map((p) => p.id).join();
+  S.pings.unseen = unseen;
+  if (changed && S.screen === "main" && S.tab === "home") renderTab();
+}
+
+/** Dismisses what the card shows, on every device on this account. Hidden here straight away. */
+async function dismissPings() {
+  const ids = S.pings.unseen.map((p) => p.id);
+  ids.forEach((id) => S.pings.dismissed.add(id));
+  S.pings.error = null;
+  refreshPings();
+  try {
+    await S.api.markPingsSeen(S.coupleId, ids);
+  } catch (e) {
+    ids.forEach((id) => S.pings.dismissed.delete(id));
+    throw e;
+  }
 }
 
 /** A join whose second write failed leaves this person nameless on the couple doc. */
@@ -536,6 +580,7 @@ function homeView() {
   // "Keeping track of the current date" — refreshed by tick().
   main.push(h("p", { class: "today muted", id: "todayText" }, todayLabel()));
 
+  if (S.pings.unseen.length) main.push(pingCard(c));
   if (c.participantUIDs.length < 2) main.push(waitingCard());
 
   main.push(countdownCard(c));
@@ -555,6 +600,33 @@ function homeView() {
   return h("div", { class: "columns" },
     h("div", { class: "col-main" }, main),
     h("div", { class: "col-side" }, comingUpCard({ limit: 5 })));
+}
+
+/** "💌 Sam is thinking of you · 2 hours ago" — until dismissed or answered. */
+function pingCard(c) {
+  const newest = S.pings.unseen[0];
+  const act = async (fn) => {
+    back.disabled = dismiss.disabled = true;
+    try {
+      await fn();
+    } catch (e) {
+      console.error("ping action failed", e);
+      S.pings.error = "Couldn't update — check your connection and try again.";
+    }
+    refreshPings();
+    renderTab();
+  };
+  const back = h("button", { class: "btn primary", id: "pingSendBackButton", onclick: () => act(async () => {
+    await S.api.sendPing(S.coupleId);
+    await dismissPings();
+  }) }, "💕 Send one back");
+  const dismiss = h("button", { class: "btn", id: "pingDismissButton", onclick: () => act(dismissPings) }, "Dismiss");
+  return h("div", { class: "card stack ping-card", id: "receivedPingCard" },
+    h("div", { class: "empty-big" }, "💌"),
+    h("h2", { id: "receivedPingText" }, pingHeadline(c.partnerProfiles[newest.sentBy]?.displayName, S.pings.unseen.length)),
+    h("p", { class: "muted small", id: "receivedPingTime" }, timeAgo(newest.sentAt)),
+    h("div", { class: "row" }, back, dismiss),
+    S.pings.error ? h("p", { class: "error" }, S.pings.error) : null);
 }
 
 function todayLabel(now = new Date()) {

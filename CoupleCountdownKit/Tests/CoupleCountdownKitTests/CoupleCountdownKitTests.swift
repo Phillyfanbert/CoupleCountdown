@@ -197,8 +197,107 @@ final class AppGroupCacheTests: XCTestCase {
         let readBack = cache.read()
         XCTAssertEqual(readBack, state)
 
+        let ping = ThinkingOfYouPing(id: "p1", sentBy: "uidB", sentAt: Date(timeIntervalSince1970: 1_700_000_200))
+        cache.writeUnseenPing(ping)
+        XCTAssertEqual(cache.readUnseenPing(), ping)
+        cache.writeUnseenPing(nil)
+        XCTAssertNil(cache.readUnseenPing())
+
         // Sign-out / leaving a pairing must stop the widget showing it.
+        cache.writeUnseenPing(ping)
         cache.clear()
         XCTAssertNil(cache.read())
+        XCTAssertNil(cache.readUnseenPing())
+    }
+}
+
+final class ThinkingOfYouPingTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private func ping(_ id: String, from sender: String, hoursAgo: Double, seen: Bool = false) -> ThinkingOfYouPing {
+        ThinkingOfYouPing(id: id, sentBy: sender, sentAt: now.addingTimeInterval(-hoursAgo * 3600), seenAt: seen ? now : nil)
+    }
+
+    func testUnseenKeepsOnlyThePartnersRecentUndismissedPingsNewestFirst() {
+        let pings = [
+            ping("mine", from: "me", hoursAgo: 1),
+            ping("older", from: "partner", hoursAgo: 30),
+            ping("newest", from: "partner", hoursAgo: 2),
+            ping("dismissed", from: "partner", hoursAgo: 3, seen: true),
+            ping("stale", from: "partner", hoursAgo: 24 * 6),
+        ]
+        XCTAssertEqual(ThinkingOfYouPing.unseen(pings, for: "me", now: now).map(\.id), ["newest", "older"])
+        XCTAssertEqual(ThinkingOfYouPing.unseen(pings, for: "partner", now: now).map(\.id), ["mine"])
+    }
+
+    func testHeadline() {
+        XCTAssertEqual(ThinkingOfYouPing.headline(senderName: "Sam", count: 1), "Sam is thinking of you")
+        XCTAssertEqual(ThinkingOfYouPing.headline(senderName: "Sam", count: 3), "Sam thought of you 3 times")
+        XCTAssertEqual(ThinkingOfYouPing.headline(senderName: nil, count: 1), "Your partner is thinking of you")
+    }
+}
+
+/// Shapes copied from real Firestore REST responses for this project.
+final class FirestoreRESTTests: XCTestCase {
+    func testTimestampsWithAndWithoutFractionalSeconds() {
+        let base = Date(timeIntervalSince1970: 1_790_294_669) // 2026-09-25T00:04:29Z
+        XCTAssertEqual(FirestoreREST.timestamp("2026-09-25T00:04:29Z"), base)
+        XCTAssertEqual(FirestoreREST.timestamp("2026-09-25T00:04:29.519Z")!.timeIntervalSince(base), 0.519, accuracy: 1e-6)
+        XCTAssertEqual(FirestoreREST.timestamp("2026-09-25T00:04:29.209719Z")!.timeIntervalSince(base), 0.209719, accuracy: 1e-6)
+        XCTAssertEqual(FirestoreREST.timestamp("2026-09-25T09:04:29.5+09:00")!.timeIntervalSince(base), 0.5, accuracy: 1e-6)
+        XCTAssertNil(FirestoreREST.timestamp("not a date"))
+    }
+
+    func testCoupleDocumentDecodes() throws {
+        let json = """
+        {"name": "projects/p/databases/(default)/documents/couples/LY6RAA", "fields": {
+          "status": {"stringValue": "apart"},
+          "nextMeetupDate": {"timestampValue": "2026-10-01T23:30:00Z"},
+          "participantUIDs": {"arrayValue": {"values": [{"stringValue": "uidA"}, {"stringValue": "uidB"}]}},
+          "partnerProfiles": {"mapValue": {"fields": {"uidA": {"mapValue": {"fields": {
+            "displayName": {"stringValue": "Alex"}, "timeZoneIdentifier": {"stringValue": "America/Chicago"}}}}}}},
+          "lastUpdatedBy": {"stringValue": "uidA"},
+          "lastUpdatedAt": {"timestampValue": "2026-09-25T00:04:29.519Z"}
+        }}
+        """
+        let state = try XCTUnwrap(FirestoreREST.relationshipState(fromDocument: Data(json.utf8)))
+        XCTAssertEqual(state.status, .apart)
+        XCTAssertEqual(state.participantUIDs, ["uidA", "uidB"])
+        XCTAssertEqual(state.partnerProfiles["uidA"]?.displayName, "Alex")
+        XCTAssertEqual(state.nextMeetupDate, FirestoreREST.timestamp("2026-10-01T23:30:00Z"))
+    }
+
+    func testRunQueryPingsDecode() throws {
+        let json = """
+        [{"document": {"name": "projects/p/databases/(default)/documents/couples/LY6RAA/pings/mVr02uplPHGW8zL6MmzO",
+           "fields": {"sentBy": {"stringValue": "uidB"},
+                      "expiresAt": {"timestampValue": "2026-09-30T00:04:30.150Z"},
+                      "sentAt": {"timestampValue": "2026-09-25T00:04:30.199Z"}},
+           "createTime": "2026-09-25T00:04:30.209719Z", "updateTime": "2026-09-25T00:04:30.209719Z"},
+          "readTime": "2026-09-25T00:04:30.443833Z"},
+         {"document": {"name": "projects/p/databases/(default)/documents/couples/LY6RAA/pings/seen1",
+           "fields": {"sentBy": {"stringValue": "uidB"},
+                      "sentAt": {"timestampValue": "2026-09-24T20:00:00Z"},
+                      "seenAt": {"timestampValue": "2026-09-24T21:00:00.5Z"}}},
+          "readTime": "2026-09-25T00:04:30.443833Z"}]
+        """
+        let pings = try XCTUnwrap(FirestoreREST.pings(fromRunQuery: Data(json.utf8)))
+        XCTAssertEqual(pings.map(\.id), ["mVr02uplPHGW8zL6MmzO", "seen1"])
+        XCTAssertEqual(pings[0].sentBy, "uidB")
+        XCTAssertNil(pings[0].seenAt)
+        XCTAssertNotNil(pings[1].seenAt)
+
+        // No matches: rows with only a readTime.
+        XCTAssertEqual(FirestoreREST.pings(fromRunQuery: Data(#"[{"readTime": "2026-09-25T00:04:30Z"}]"#.utf8)), [])
+        // An error body isn't a runQuery result.
+        XCTAssertNil(FirestoreREST.pings(fromRunQuery: Data(#"{"error": {"code": 403}}"#.utf8)))
+    }
+
+    func testRecentPingsQueryShape() throws {
+        let body = FirestoreREST.recentPingsQuery(since: Date(timeIntervalSince1970: 1_790_294_669))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let query = try XCTUnwrap(json["structuredQuery"] as? [String: Any])
+        let filter = try XCTUnwrap((query["where"] as? [String: Any])?["fieldFilter"] as? [String: Any])
+        XCTAssertEqual(filter["op"] as? String, "GREATER_THAN")
+        XCTAssertEqual((filter["value"] as? [String: Any])?["timestampValue"] as? String, "2026-09-25T00:04:29Z")
     }
 }

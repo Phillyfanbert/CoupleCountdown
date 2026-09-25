@@ -11,10 +11,14 @@ const {
   assertFails,
 } = require('@firebase/rules-unit-testing');
 const {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } = require('firebase/firestore');
 
@@ -253,6 +257,37 @@ describe('couples/{coupleId}/{sub=**} — subcollections', () => {
     await assertFails(
       getDoc(doc(testEnv.authenticatedContext(UID_C).firestore(), 'couples', COUPLE_ID, 'events', 'e1'))
     );
+  });
+});
+
+describe('couples/{coupleId}/pings — "thinking of you"', () => {
+  const since = new Date(Date.now() - 5 * 86400000);
+  const recentPings = (uid) =>
+    query(collection(testEnv.authenticatedContext(uid).firestore(), 'couples', COUPLE_ID, 'pings'), where('sentAt', '>', since));
+
+  async function seedPing() {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'couples', COUPLE_ID, 'pings', 'p1'), {
+        sentBy: UID_B,
+        sentAt: new Date(),
+        expiresAt: new Date(Date.now() + 5 * 86400000),
+      });
+    });
+  }
+
+  it('lets the partner list recent pings and mark one seen (how it reaches them)', async () => {
+    await seedCouple([UID_A, UID_B]);
+    await seedPing();
+    await assertSucceeds(getDocs(recentPings(UID_A)));
+    await assertSucceeds(
+      updateDoc(doc(testEnv.authenticatedContext(UID_A).firestore(), 'couples', COUPLE_ID, 'pings', 'p1'), { seenAt: new Date() })
+    );
+  });
+
+  it('rejects a non-participant listing pings', async () => {
+    await seedCouple([UID_A, UID_B]);
+    await seedPing();
+    await assertFails(getDocs(recentPings(UID_C)));
   });
 });
 

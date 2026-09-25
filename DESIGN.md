@@ -20,9 +20,8 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
 - **Data model changes since the plan:**
   - `users/{uid}` holds each account's name and current pairing.
   - `couples/{id}/visits` holds planned meetups with a time (§7.5).
-  - The couple doc gains `closed` (cancelled before anyone joined) and
-    `codeExpiresAt`.
-  - Pings gain `expiresAt`.
+  - The couple doc gains `closed` (cancelled before anyone joined).
+  - Pings gain `expiresAt` and `seenAt`.
 
   §5.1 is updated.
 - **Built:**
@@ -35,7 +34,9 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
   - Each partner's local time (§9.1).
   - Themes (§9).
   - Milestone celebrations (§7.3, iPhone only).
-  - "Thinking of you", send side only (see below).
+  - "Thinking of you": sent from either client, shown to the partner on
+    their countdown screen and iPhone widget until they dismiss it or send
+    one back (§7.1).
 - **Sync:** as planned in §5.2:
   - the realtime listener;
   - the launch fetch;
@@ -48,19 +49,13 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
   release. SideStore installs the app and signs it with the user's free
   Apple ID (§13).
 - **Tests in CI:**
-  - 14 XCUITests against the live backend;
-  - 19 `CoupleCountdownKit` unit tests;
-  - 29 Security Rules tests on the emulator;
-  - 18 web logic tests, run in five time zones.
+  - 15 XCUITests against the live backend;
+  - 25 `CoupleCountdownKit` unit tests;
+  - 31 Security Rules tests on the emulator;
+  - 21 web logic tests, run in five time zones.
 
 **Known gaps (not built, or not verified yet):**
 
-- **"Thinking of you"** nudges are written to `pings`, but neither client
-  reads or shows received ones yet, so the partner never sees them (§7.1).
-- **Join codes don't actually expire.** Both clients write `codeExpiresAt`,
-  but no Firestore TTL policy is configured on the project and the rules
-  don't check the field (§5.3 step 6). Pings have no TTL policy either. A
-  code does stop working once the partner joins, or once it's cancelled.
 - **Not confirmed on a physical iPhone:** App Groups and Keychain Sharing
   under SideStore's free Apple ID signing (§10). CI exercises only the
   Simulator and an unsigned device build.
@@ -72,6 +67,10 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
   milestone celebration. Neither client has push notifications (§2).
 - **Leaving a pairing** isn't possible once the partner has joined. The only
   options are cancelling before then, and signing out.
+
+**Decided:** join codes don't expire. A code keeps working until the partner
+joins with it (the rules then refuse anyone else) or the pairing is
+cancelled (§5.3 step 6).
 
 ## 1. Concept
 
@@ -304,8 +303,8 @@ couples/{coupleId}                      // coupleId is the human-shareable join 
     }
   - lastUpdatedBy: uid
   - lastUpdatedAt: Timestamp            // FieldValue.serverTimestamp()
-  - codeExpiresAt: Timestamp?           // set at create, removed on join (§5.3
-                                        // step 6); not yet enforced, see §0
+  - codeExpiresAt: Timestamp?           // legacy: earlier builds wrote it; codes
+                                        // don't expire (§5.3 step 6), ignored
   - closed: Bool?                       // cancelled before anyone joined (§7.5)
 
 users/{uid}                             // one per account; owner-only (§5.3 note)
@@ -336,10 +335,13 @@ couples/{coupleId}/importantDates/{id}  // see §7.4
 couples/{coupleId}/pings/{pingId}       // "thinking of you", see §7.1
   - sentBy: uid
   - sentAt: Timestamp
-  - expiresAt: Timestamp                // sentAt + 5 days, for the TTL policy
+  - expiresAt: Timestamp                // sentAt + 5 days, for a TTL policy
+  - seenAt: Timestamp?                  // set when the recipient dismisses it or
+                                        // sends one back (§7.1)
   // Planned: a TTL policy on expiresAt auto-deletes these after a few days,
-  // no Cloud Function needed. As built, the policy isn't configured yet
-  // (§0). (Verified: TTL is a Standard-edition Firestore feature, not
+  // no Cloud Function needed. As built, the policy isn't configured, and
+  // doesn't need to be: clients only read the last few days' pings, so old
+  // ones cost nothing but storage. (Verified: TTL is a Standard-edition Firestore feature, not
   // gated to Enterprise edition — a first search pass misread Firebase's
   // doc-site URL structure and suggested otherwise; a second pass found
   // Google's own docs explicitly describing TTL field behavior "for
@@ -450,7 +452,8 @@ failure mode for that).
    tap Join with the code you'll get next."* If both partners mistakenly
    tap Create, the result is just two unused, unpaired couple docs — no
    corruption, and each self-cleans via the 48-hour TTL in step 6. Not
-   worth a technical fix beyond clear copy. Before branching into
+   worth a technical fix beyond clear copy. *(As built: there's no TTL. The
+   creator cancels the spare pairing from the waiting card instead, §7.5.)* Before branching into
    Create/Join, ask for a display name (a single text field) — this is
    `partnerProfiles[uid].displayName` (§5.1), and it's the only onboarding
    input needed beyond the code itself.
@@ -545,7 +548,7 @@ failure mode for that).
    *(As built: the snippet above is the original v1. The live file adds
    owner-only `users/{uid}` records and refuses joining a `closed` pairing.
    It also allows `closed` to be set only while nobody has joined. The suite
-   is now 29 tests, run in CI on every push.)*
+   is now 31 tests, run in CI on every push.)*
 6. **Guessing-window mitigation**: at creation, set `codeExpiresAt: now +
    48h` on the couple doc and register it with a Firestore TTL policy
    (free on Spark, no Cloud Function — verified in §5.1). When the second
@@ -553,12 +556,16 @@ failure mode for that).
    clear `codeExpiresAt` to `null` as part of that same write, so paired
    couples are never auto-deleted — only codes that sat unpaired for 2 days
    get cleaned up, which is what bounds how long a ~1-billion-combination
-   code stays guessable at all. **As built: not in effect yet.** Both
-   clients write and clear `codeExpiresAt` as described, but no TTL policy
-   has been configured on the Firebase project, and the rules don't compare
-   `request.time` with the field. An unjoined code therefore stays joinable
-   until someone joins or it's cancelled. Closing this needs a TTL policy on
-   `couples.codeExpiresAt`, a rules check on the join path, or both.
+   code stays guessable at all. **As built: dropped, by decision.** Codes
+   don't expire. A code keeps working until the partner joins with it (the
+   rules then refuse anyone else) or the pairing is cancelled (the rules
+   refuse joining a `closed` pairing). Neither client writes
+   `codeExpiresAt` any more; pairings created by earlier builds may still
+   carry one, which nothing reads, and no TTL policy exists on the project.
+   The trade-off: an unjoined code stays guessable for as long as it's left
+   unjoined, bounded only by the ~1-billion code space and Firestore's
+   per-project quotas (App Check, §10, is the upgrade if that ever
+   matters).
 7. Both devices persist `coupleId` locally (UserDefaults is fine — it's not
    secret on its own once paired) and from then on read/write the same
    document and subcollections via the standard Firestore SDK (app) or REST
@@ -752,7 +759,14 @@ made:
   second entry at the meetup moment itself makes the widget switch to "The
   day is here" on time, rather than at its next refresh. The widget's states
   are together, counting down, the day is here, plan your next visit, and
-  not paired yet.)*
+  not paired yet, plus a "thinking of you" line (§7.1). Two fixes found
+  while adding that line, neither visible in CI's Simulator runs: the view
+  now sets `containerBackground`, without which iOS 17+ shows "Please adopt
+  containerBackground API" in place of the widget. The REST responses are
+  now decoded by `FirestoreREST` in `CoupleCountdownKit`, where they're
+  unit-tested. Before, the widget's timestamp parser rejected Firestore's
+  fractional seconds, so every independent fetch failed and the widget only
+  ever showed what the app had cached.)*
 
 ## 7. Calendar / logging — options
 
@@ -784,12 +798,28 @@ auto-expire after a few days — free on the Spark plan, no cleanup job
 needed. They're intentionally not written into the permanent
 `RelationshipEvent`/`events` history (§7) — a nudge isn't a milestone.
 
-**As built: only half done.** Both clients send a ping, as a `pings`
-document with `expiresAt`, but neither one reads the collection or shows a
-received ping. The partner therefore never sees it yet, and the TTL policy
-isn't configured either (§0). Finishing it means showing recent pings from
-the other partner on the countdown screen in both clients, and optionally
-in the widget.
+**As built.** Both clients send a ping as a `pings` document (`sentBy`,
+`sentAt`, `expiresAt`). Delivery:
+
+- **App and web:** while the countdown screen is open, each client listens
+  to pings from the last 5 days (a single-field `sentAt` filter, so no
+  composite index). The partner's unseen ones show as a card: "💌 Sam is
+  thinking of you · 2 hours ago", or "Sam thought of you 3 times", with
+  *Send one back* and *Dismiss*.
+- **Widget:** each timeline refresh also runs a REST `:runQuery` for recent
+  pings and shows "💌 Sam is thinking of you" under the countdown (not on
+  the circular or inline Lock Screen widgets). The app keeps the widget's
+  cached copy current when it sees or dismisses one.
+- **Seen:** dismissing, or sending one back, writes `seenAt` on those pings,
+  so every device on the recipient's account, and the widget, stop showing
+  them. Unseen pings older than 5 days simply stop being shown.
+- **Shared logic:** which pings to show is `ThinkingOfYouPing.unseen`
+  (Swift) / `unseenPings` (web), unit-tested in both. It needs no rules
+  change, since participants can already read and write the subcollection;
+  two rules tests pin that down.
+
+Without push, the partner sees a ping when they next open either app, or
+when their widget next refreshes (§5.4).
 
 ### 7.2 Cumulative stats
 
@@ -981,7 +1011,7 @@ keeps this accurate in practice almost all the time.
   routine software update (Sonoma 14.6.1 → Sequoia/Tahoe) before installing
   the latest Xcode.
 - **Firestore Security Rules** (§5.3): written, run against the local
-  emulator, 18/18 tests passing at the time, now 29 and run in CI on every
+  emulator, 18/18 tests passing at the time, now 31 and run in CI on every
   push (`firebase/test/rules.test.js`) — this
   needed no Apple hardware at all, so it was done ahead of the
   device-bound items above rather than waiting on them. Found and fixed a
@@ -1011,10 +1041,11 @@ them:**
   joined yet, and any device can sign out. Leaving a pairing both partners
   are in is still out of scope.
 - **Firebase App Check** (free, DeviceCheck/App Attest-based): not in v1
-  (§5.7) — the 48-hour code TTL (§5.3) is judged sufficient hardening for a
-  2-person app for now. App Check would shut down automated code-guessing
-  entirely rather than just bounding its window, and can be added later
-  without any data-model change if it ever seems worth it.
+  (§5.7) — originally because the 48-hour code TTL (§5.3) was judged
+  sufficient hardening for a 2-person app. *(As built, codes don't expire,
+  by decision (§5.3 step 6), so App Check is now the only upgrade available
+  against automated code-guessing. It can be added later without any
+  data-model change if it ever seems worth it.)*
 
 ## 11. Suggested future features (not committed)
 
@@ -1102,18 +1133,15 @@ it hasn't been confirmed on a physical iPhone yet.
    (§7.5). The exceptions are listed under known gaps in §0.
 8. A real app icon.
 9. The web client (above).
+10. "Thinking of you" delivery: the card in both clients and the widget line
+    (§7.1).
 
 **Next:**
 
 1. Install on a physical iPhone through SideStore. Confirm that App Groups
    and Keychain Sharing (the widget's data path, §5.5) work under free
    Apple ID signing, as the §10 spike intended.
-2. Show received "thinking of you" pings to the partner, in both clients
-   (§7.1).
-3. Make join codes actually expire (§5.3 step 6). Add a TTL policy on
-   `couples.codeExpiresAt` and a rules check on the join path, plus a TTL
-   policy on `pings.expiresAt`.
-4. Surface the `BGAppRefreshTask` firing log, for example in Settings, so
+2. Surface the `BGAppRefreshTask` firing log, for example in Settings, so
    §10's keep-or-drop threshold can be evaluated with real data.
-5. Optional: milestone celebrations on web, leaving a pairing after both
+3. Optional: milestone celebrations on web, leaving a pairing after both
    partners have joined, and a per-couple (shared) theme.

@@ -90,14 +90,9 @@ final class FirestoreService {
         try batch.setData(from: state, forDocument: coupleRef(coupleId))
         batch.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
         try await batch.commit()
-        // codeExpiresAt (§5.3 point 6) is Firestore-lifecycle-only
-        // metadata, not modeled in RelationshipState — kept out of the
-        // create write so the Security Rules' create check
-        // (`participantUIDs == [request.auth.uid]`) can stay a simple
-        // equality test against the whole document.
-        try await coupleRef(coupleId).updateData([
-            "codeExpiresAt": Timestamp(date: Date().addingTimeInterval(48 * 3600)),
-        ])
+        // No expiry: a code stays joinable until the partner joins or the
+        // pairing is cancelled (both enforced by the rules). It used to get
+        // a 48-hour codeExpiresAt here, which nothing ever enforced.
     }
 
     /// Joins an existing couple doc. Two writes, because the rules' join
@@ -109,9 +104,9 @@ final class FirestoreService {
     /// It used to be in the second: if that one failed, the joiner was in
     /// the pairing but their account never knew — and retrying Join was
     /// refused because they were already a participant, so they were stuck
-    /// for good. Now the second write only adds the name/time zone and
-    /// clears codeExpiresAt; if it fails, `ensurePartnerProfile` fills the
-    /// profile in the next time the countdown loads.
+    /// for good. Now the second write only adds the name/time zone; if it
+    /// fails, `ensurePartnerProfile` fills the profile in the next time the
+    /// countdown loads.
     func joinCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
         let join = db.batch()
         join.updateData(["participantUIDs": FieldValue.arrayUnion([uid])], forDocument: coupleRef(coupleId))
@@ -123,7 +118,6 @@ final class FirestoreService {
                 "displayName": displayName,
                 "timeZoneIdentifier": timeZoneIdentifier,
             ],
-            "codeExpiresAt": FieldValue.delete(),
         ])
     }
 
@@ -288,6 +282,47 @@ final class FirestoreService {
             "sentAt": FieldValue.serverTimestamp(),
             "expiresAt": Timestamp(date: Date().addingTimeInterval(ThinkingOfYouPing.lifetime)),
         ])
+    }
+
+    /// Both partners' pings from the last `ThinkingOfYouPing.lifetime`,
+    /// live; `ThinkingOfYouPing.unseen` picks out the ones to show. Filtered
+    /// by time only (one field, so no composite index needed) — it's a
+    /// handful of documents.
+    func listenToRecentPings(
+        coupleId: String,
+        now: Date = Date(),
+        onChange: @escaping ([ThinkingOfYouPing]) -> Void
+    ) -> ListenerRegistration {
+        let cutoff = Timestamp(date: now.addingTimeInterval(-ThinkingOfYouPing.lifetime))
+        return coupleRef(coupleId).collection("pings")
+            .whereField("sentAt", isGreaterThan: cutoff)
+            .addSnapshotListener { snapshot, _ in
+                guard let snapshot else { return }
+                onChange(snapshot.documents.compactMap { doc in
+                    guard
+                        let sentBy = doc.get("sentBy") as? String,
+                        let sentAt = doc.get("sentAt", serverTimestampBehavior: .estimate) as? Timestamp
+                    else { return nil }
+                    return ThinkingOfYouPing(
+                        id: doc.documentID,
+                        sentBy: sentBy,
+                        sentAt: sentAt.dateValue(),
+                        expiresAt: (doc.get("expiresAt") as? Timestamp)?.dateValue(),
+                        seenAt: (doc.get("seenAt", serverTimestampBehavior: .estimate) as? Timestamp)?.dateValue()
+                    )
+                })
+            }
+    }
+
+    /// Marks the partner's pings as seen, so every device on this account
+    /// (and the widget) stops showing them.
+    func markPingsSeen(ids: [String], coupleId: String) async throws {
+        guard !ids.isEmpty else { return }
+        let batch = db.batch()
+        for id in ids {
+            batch.updateData(["seenAt": FieldValue.serverTimestamp()], forDocument: coupleRef(coupleId).collection("pings").document(id))
+        }
+        try await batch.commit()
     }
 
     // MARK: - Stats (§7.2)

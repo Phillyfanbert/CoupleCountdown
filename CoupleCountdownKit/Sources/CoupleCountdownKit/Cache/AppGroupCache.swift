@@ -16,6 +16,7 @@ import Foundation
 public struct AppGroupCache {
     private let defaults: UserDefaults?
     private let stateKey = "cachedRelationshipState"
+    private let pingKey = "cachedUnseenPing"
 
     /// `suiteName` must match the App Group identifier configured in both
     /// the app and widget targets' entitlements (DESIGN.md §5.6) — that
@@ -35,9 +36,26 @@ public struct AppGroupCache {
         return try? JSONDecoder().decode(RelationshipState.self, from: data)
     }
 
+    /// The newest "thinking of you" from the partner that's still waiting
+    /// to be seen, or nil to clear it. Written by the app (its listener
+    /// sees pings first while open) and by the widget's own fetch.
+    public func writeUnseenPing(_ ping: ThinkingOfYouPing?) {
+        guard let ping, let data = try? JSONEncoder().encode(ping) else {
+            defaults?.removeObject(forKey: pingKey)
+            return
+        }
+        defaults?.set(data, forKey: pingKey)
+    }
+
+    public func readUnseenPing() -> ThinkingOfYouPing? {
+        guard let data = defaults?.data(forKey: pingKey) else { return nil }
+        return try? JSONDecoder().decode(ThinkingOfYouPing.self, from: data)
+    }
+
     /// Forget the cached pairing — on sign-out, or when the account leaves
     /// or cancels its pairing — so the widget stops showing it.
     public func clear() {
         defaults?.removeObject(forKey: stateKey)
+        defaults?.removeObject(forKey: pingKey)
     }
 }

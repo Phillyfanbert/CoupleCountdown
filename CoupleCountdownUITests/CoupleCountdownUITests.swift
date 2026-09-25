@@ -453,6 +453,39 @@ final class CoupleCountdownUITests: XCTestCase {
         waitForExpectations(timeout: 15) // real Firestore write for sendPing()
     }
 
+    func testPartnerSeesThinkingOfYouAndCanDismissIt() {
+        // Regression: pings were sent and then never shown to anyone. Two
+        // real accounts: Alex creates, Sam joins and sends one, then Alex
+        // signs back in and sees it.
+        var app = launchFreshApp()
+        let (alexEmail, code) = completeOnboardingByCreating(app, name: "Alex")
+        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
+        tapWhenReady(app.buttons["signOutButton"], in: app)
+
+        signUp(app, name: "Sam")
+        let codeField = app.textFields["joinCodeTextField"]
+        tap(app.buttons["joinPairingButton"], until: codeField, in: app)
+        codeField.tap()
+        codeField.typeText(code)
+        tap(app.buttons["joinButton"], until: app.buttons["toggleStatusButton"], in: app)
+
+        let pingButton = app.buttons["thinkingOfYouButton"]
+        tapWhenReady(pingButton, in: app)
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Sent, with love"), evaluatedWith: pingButton, handler: nil)
+        waitForExpectations(timeout: 15)
+
+        // Relaunching with the reset deletes Sam's test account; the ping stays.
+        app = launchFreshApp()
+        signIn(app, email: alexEmail, password: testPassword)
+        let pingText = app.staticTexts["receivedPingText"]
+        XCTAssertTrue(pingText.waitForExistence(timeout: 20), "Alex should see Sam's \"thinking of you\" on the countdown screen")
+        declineSavePasswordPrompt(app)
+        XCTAssertEqual(pingText.label, "Sam is thinking of you")
+
+        tapWhenReady(app.buttons["pingDismissButton"], in: app)
+        XCTAssertTrue(waitForNonExistence(of: pingText, timeout: 10), "Dismissing should clear it")
+    }
+
     // MARK: - Milestone celebration
 
     func testMilestoneCelebrationShowsAndDismissesOnTap() {

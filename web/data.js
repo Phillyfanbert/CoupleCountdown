@@ -14,16 +14,16 @@ import {
   deleteField,
   doc,
   getDocs,
+  onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
-import { dayFromStored, normalizedStart, storedFromLocalDay } from "./logic.js";
-
-const PING_LIFETIME_MS = 5 * 86_400_000;
-const CODE_LIFETIME_MS = 48 * 3_600_000;
+import { dayFromStored, normalizedStart, PING_LIFETIME_MS, storedFromLocalDay } from "./logic.js";
 
 // Same alphabet as JoinCodeGenerator.swift — no 0/O/1/I.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -68,11 +68,8 @@ export function makeApi(db, uid) {
       });
       batch.set(userRef(), { displayName, coupleId }, { merge: true });
       await batch.commit();
-      // Separate write: the Security Rules' create check is an equality test on
-      // participantUIDs, so codeExpiresAt stays out of the create.
-      await updateDoc(coupleRef(coupleId), {
-        codeExpiresAt: Timestamp.fromMillis(Date.now() + CODE_LIFETIME_MS),
-      });
+      // No expiry: a code stays joinable until the partner joins or the
+      // pairing is cancelled (both enforced by the rules).
     },
 
     /**
@@ -93,7 +90,6 @@ export function makeApi(db, uid) {
       await join.commit();
       await updateDoc(coupleRef(coupleId), {
         [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
-        codeExpiresAt: deleteField(),
       });
     },
 
@@ -216,6 +212,33 @@ export function makeApi(db, uid) {
         sentAt: serverTimestamp(),
         expiresAt: Timestamp.fromMillis(Date.now() + PING_LIFETIME_MS),
       });
+    },
+
+    /**
+     * Both partners' pings from the last few days, live; unseenPings (logic.js)
+     * picks out the ones to show. Filtered by time only — one field, so no
+     * composite index. Returns the unsubscribe function.
+     */
+    watchRecentPings(coupleId, onChange, onError) {
+      const cutoff = Timestamp.fromMillis(Date.now() - PING_LIFETIME_MS);
+      const q = query(collection(coupleRef(coupleId), "pings"), where("sentAt", ">", cutoff));
+      return onSnapshot(q, (snap) => {
+        onChange(snap.docs
+          .map((d) => {
+            const data = d.data({ serverTimestamps: "estimate" });
+            if (typeof data.sentBy !== "string" || !data.sentAt?.toDate) return null;
+            return { id: d.id, sentBy: data.sentBy, sentAt: data.sentAt.toDate(), seenAt: data.seenAt?.toDate?.() ?? null };
+          })
+          .filter(Boolean));
+      }, onError);
+    },
+
+    /** Marks the partner's pings seen, so every device on this account stops showing them. */
+    async markPingsSeen(coupleId, ids) {
+      if (!ids.length) return;
+      const batch = writeBatch(db);
+      for (const id of ids) batch.update(doc(collection(coupleRef(coupleId), "pings"), id), { seenAt: serverTimestamp() });
+      await batch.commit();
     },
 
     async fetchEvents(coupleId) {

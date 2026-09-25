@@ -7,11 +7,18 @@ import CoupleCountdownKit
 /// token the app persisted into the shared Keychain (§5.5) — plain REST against
 /// Google's token endpoint, no Firebase Auth SDK bundled into the widget
 /// extension.
+/// A minted ID token, and whose it is — the widget needs the uid to tell
+/// the partner's "thinking of you" pings from this person's own.
+struct WidgetSession {
+    let idToken: String
+    let uid: String
+}
+
 struct WidgetAuthTokenProvider {
     private let keychain: KeychainStore
     /// Firebase Web API key — public, identifies the Firebase project
     /// rather than authenticating anything by itself, so it's safe to
-    /// embed. Placeholder until the real Firebase project exists (§5.7).
+    /// embed.
     private let apiKey: String
 
     init(keychainAccessGroup: String = SharedIdentifiers.keychainAccessGroup, apiKey: String) {
@@ -23,7 +30,7 @@ struct WidgetAuthTokenProvider {
     /// network, bad response), and WidgetFirestoreClient treats a nil
     /// token as "fall back to the App Group cache" per §5.5's
     /// failure-mode behavior.
-    func fetchIDToken() async -> String? {
+    func fetchSession() async -> WidgetSession? {
         guard let refreshToken = keychain.read() else { return nil }
 
         guard let url = URL(string: "https://securetoken.googleapis.com/v1/token?key=\(apiKey)") else { return nil }
@@ -39,9 +46,10 @@ struct WidgetAuthTokenProvider {
             let httpResponse = response as? HTTPURLResponse,
             httpResponse.statusCode == 200,
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let idToken = json["id_token"] as? String
+            let idToken = json["id_token"] as? String,
+            let uid = json["user_id"] as? String
         else { return nil }
 
-        return idToken
+        return WidgetSession(idToken: idToken, uid: uid)
     }
 }

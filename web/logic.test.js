@@ -17,9 +17,12 @@ import {
   nextUpcoming,
   normalizedStart,
   parseLocalISODate,
+  pingHeadline,
   relativeDayLabel,
   resolvedNextMeetup,
   storedFromLocalDay,
+  timeAgo,
+  unseenPings,
 } from "./logic.js";
 
 const DAY = 86_400_000;
@@ -143,4 +146,34 @@ test("countdownParts splits a duration and returns null once passed", () => {
   const target = new Date(start.getTime() + (2 * DAY + 3 * 3600_000 + 4 * 60_000 + 5_000));
   assert.deepEqual(countdownParts(target, start), { days: 2, hours: 3, minutes: 4, seconds: 5 });
   assert.equal(countdownParts(start, target), null);
+});
+
+test("unseen pings: the partner's recent, undismissed ones, newest first (same case as the Swift test)", () => {
+  const now = new Date(1_800_000_000_000);
+  const ping = (id, sentBy, hoursAgo, seen = false) => ({ id, sentBy, sentAt: new Date(now - hoursAgo * 3_600_000), seenAt: seen ? now : null });
+  const pings = [
+    ping("mine", "me", 1),
+    ping("older", "partner", 30),
+    ping("newest", "partner", 2),
+    ping("dismissed", "partner", 3, true),
+    ping("stale", "partner", 24 * 6),
+  ];
+  assert.deepEqual(unseenPings(pings, "me", now).map((p) => p.id), ["newest", "older"]);
+  assert.deepEqual(unseenPings(pings, "partner", now).map((p) => p.id), ["mine"]);
+});
+
+test("ping headline", () => {
+  assert.equal(pingHeadline("Sam", 1), "Sam is thinking of you");
+  assert.equal(pingHeadline("Sam", 3), "Sam thought of you 3 times");
+  assert.equal(pingHeadline(undefined, 1), "Your partner is thinking of you");
+});
+
+test("timeAgo", () => {
+  const now = new Date(1_800_000_000_000);
+  const ago = (ms) => timeAgo(new Date(now - ms), now, "en");
+  assert.equal(ago(20_000), "just now");
+  assert.equal(ago(5 * 60_000), "5 minutes ago");
+  assert.equal(ago(2 * 3_600_000), "2 hours ago");
+  assert.equal(ago(26 * 3_600_000), "yesterday");
+  assert.equal(ago(3 * 86_400_000), "3 days ago");
 });

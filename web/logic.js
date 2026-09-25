@@ -102,6 +102,37 @@ export function defaultVisitStart(now = new Date()) {
   return d;
 }
 
+// ---------- "thinking of you" ----------
+// Mirrors ThinkingOfYouPing.swift.
+
+/** How long a ping stays worth showing to the partner. */
+export const PING_LIFETIME_MS = 5 * DAY_MS;
+
+/** The pings `uid` should see: sent by the partner, not dismissed, recent. Newest first. */
+export function unseenPings(pings, uid, now = new Date()) {
+  return pings
+    .filter((p) => p.sentBy !== uid && !p.seenAt && now - p.sentAt < PING_LIFETIME_MS)
+    .sort((a, b) => b.sentAt - a.sentAt);
+}
+
+/** "Sam is thinking of you" / "Sam thought of you 3 times". */
+export function pingHeadline(senderName, count) {
+  const name = senderName || "Your partner";
+  return count > 1 ? `${name} thought of you ${count} times` : `${name} is thinking of you`;
+}
+
+/** "just now", "5 minutes ago", "yesterday", "3 days ago" (in `locale`, default the browser's). */
+export function timeAgo(date, now = new Date(), locale = undefined) {
+  const seconds = Math.round((date - now) / 1000);
+  if (seconds > -60) return "just now";
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const minutes = Math.round(seconds / 60);
+  if (minutes > -60) return rtf.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours > -24) return rtf.format(hours, "hour");
+  return rtf.format(Math.round(hours / 24), "day");
+}
+
 // ---------- month grid ----------
 
 /** Days of a month as local midnights, preceded by nulls to line the 1st up under its weekday (Sunday-first). */
