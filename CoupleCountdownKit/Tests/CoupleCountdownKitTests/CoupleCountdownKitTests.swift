@@ -253,6 +253,9 @@ final class VisitTimingTests: XCTestCase {
         XCTAssertEqual(MeetupPlanner.visitMetEarly(current: planned.start, visits: [later, planned], now: now)?.id, "v")
         // On time or late: nothing to move.
         XCTAssertNil(MeetupPlanner.visitMetEarly(current: now.addingTimeInterval(-60), visits: [planned], now: now))
+        // A week out is a separate trip: seeing each other now doesn't cancel it.
+        let nextWeek = Visit(id: "n", start: now.addingTimeInterval(7 * 86_400), note: nil, createdBy: "a")
+        XCTAssertNil(MeetupPlanner.visitMetEarly(current: nextWeek.start, visits: [nextWeek], now: now))
         XCTAssertNil(MeetupPlanner.visitMetEarly(current: nil, visits: [planned], now: now))
     }
 

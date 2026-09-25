@@ -232,6 +232,9 @@ test("meeting early finds the visit that was counted down to", () => {
   const later = { id: "w", start: new Date(nowT.getTime() + 30 * DAY) };
   assert.equal(visitMetEarly(planned.start, [later, planned], nowT)?.id, "v");
   assert.equal(visitMetEarly(new Date(nowT.getTime() - 60_000), [planned], nowT), null);
+  // A week out is a separate trip: seeing each other now doesn't cancel it.
+  const nextWeek = { id: "n", start: new Date(nowT.getTime() + 7 * DAY) };
+  assert.equal(visitMetEarly(nextWeek.start, [nextWeek], nowT), null);
   assert.equal(visitMetEarly(null, [planned], nowT), null);
 });
 

@@ -91,13 +91,21 @@ export function resolvedNextMeetup(current, visits, removed = null, now = new Da
 }
 
 /**
- * Saying you're together *before* the planned visit's start: that visit is
- * happening now. Returns the visit the countdown pointed at if it's still
- * ahead, so it can be moved to now — otherwise "Leaving again" before its
- * original time counted down to it again. Mirrors MeetupPlanner.visitMetEarly.
+ * How close a planned visit has to be for "we're together now" to mean it's
+ * happening early. Further out it's a separate trip: seeing each other this
+ * weekend doesn't cancel the one planned for next week.
+ */
+export const MET_EARLY_WINDOW_MS = 24 * 3_600_000;
+
+/**
+ * Saying you're together shortly *before* the planned visit's start: that
+ * visit is happening now. Returns the visit the countdown pointed at if it's
+ * due within MET_EARLY_WINDOW_MS, so it can be moved to now — otherwise
+ * "Leaving again" before its original time counted down to it again.
+ * Mirrors MeetupPlanner.visitMetEarly.
  */
 export function visitMetEarly(current, visits, now = new Date()) {
-  if (!current || current <= now) return null;
+  if (!current || current <= now || current - now > MET_EARLY_WINDOW_MS) return null;
   return visits.find((v) => Math.abs(v.start - current) < 1000) ?? null;
 }
 

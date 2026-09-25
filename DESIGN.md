@@ -991,10 +991,13 @@ happened. Cheap to get right up front, easy to overlook.
   partner's ran "Leaving again".
 - **Double taps:** the status buttons pause for a second after each change,
   because the main button swaps its label in place.
-- **Meeting early:** saying you're together before the planned visit's time
-  moves that visit to now, in the same batch (`MeetupPlanner.visitMetEarly`).
-  Otherwise "Leaving again" before the original time counted down to the
-  same visit again.
+- **Meeting early:** saying you're together within a day of the planned
+  visit's time moves that visit to now, in the same batch
+  (`MeetupPlanner.visitMetEarly`). Otherwise "Leaving again" before the
+  original time counted down to the same visit again. A visit further out
+  is left alone: it's a separate trip, not this one arriving early. The
+  first version moved any upcoming visit, and the UI tests caught it
+  swallowing next week's trip.
 
 ## 9. Visual design direction
 

@@ -52,13 +52,18 @@ public enum MeetupPlanner {
 
     /// A picked date-and-time trimmed to the minute, so the same visit
     /// compares equal after a round trip through Firestore.
-    /// Saying you're together *before* the planned visit's start means that
-    /// visit is happening now. Returns the visit the countdown pointed at if
-    /// it's still ahead, so it can be moved to now — otherwise "Leaving
-    /// again" before its original time counted down to it all over again.
-    /// Mirrors visitMetEarly in web/logic.js.
+    /// How close a planned visit has to be for "we're together now" to mean
+    /// it's happening early. Further out, it's a separate trip: seeing each
+    /// other this weekend doesn't cancel the one planned for next week.
+    public static let metEarlyWindow: TimeInterval = 24 * 3_600
+
+    /// Saying you're together shortly *before* the planned visit's start
+    /// means that visit is happening now. Returns the visit the countdown
+    /// pointed at if it's due within `metEarlyWindow`, so it can be moved to
+    /// now — otherwise "Leaving again" before its original time counted down
+    /// to it all over again. Mirrors visitMetEarly in web/logic.js.
     public static func visitMetEarly(current: Date?, visits: [Visit], now: Date = Date()) -> Visit? {
-        guard let current, current > now else { return nil }
+        guard let current, current > now, current.timeIntervalSince(now) <= metEarlyWindow else { return nil }
         return visits.first { abs($0.start.timeIntervalSince(current)) < 1 }
     }
 
