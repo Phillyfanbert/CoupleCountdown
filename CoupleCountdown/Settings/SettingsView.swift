@@ -47,6 +47,9 @@ struct SettingsView: View {
                     authService.signOut()
                 }
                 .accessibilityIdentifier("signOutButton")
+                if let signOutError = authService.signOutError {
+                    Text(signOutError).font(.caption).foregroundStyle(.red)
+                }
             } header: {
                 Text("Account")
             } footer: {

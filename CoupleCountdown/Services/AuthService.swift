@@ -24,6 +24,8 @@ final class AuthService: ObservableObject {
     /// still being written — the app waits on it so the brand-new account
     /// doesn't flash the "what's your name?" step it's about to skip.
     @Published private(set) var isFinishingSignUp = false
+    /// Shown next to the Sign out buttons when signing out didn't work.
+    @Published private(set) var signOutError: String?
 
     private let keychain: KeychainStore
     private var stateListener: AuthStateDidChangeListenerHandle?
@@ -76,12 +78,19 @@ final class AuthService: ObservableObject {
         try await Auth.auth().sendPasswordReset(withEmail: email)
     }
 
+    /// Signs out and forgets the widget's token. If Firebase couldn't sign
+    /// out, this stays signed in and says so — it used to show the sign-in
+    /// screen regardless (and delete the widget's token), and the account
+    /// quietly came back on the next launch.
     func signOut() {
         do {
             try Auth.auth().signOut()
         } catch {
             print("AuthService.signOut() failed: \(error)")
+            signOutError = "Couldn't sign out — try again."
+            return
         }
+        signOutError = nil
         keychain.delete()
         apply(nil)
     }

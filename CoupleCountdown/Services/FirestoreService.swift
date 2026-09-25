@@ -142,6 +142,13 @@ final class FirestoreService {
         try await batch.commit()
     }
 
+    /// Detaches a pairing this account can't open (the countdown's "Leave
+    /// this pairing"), so it can create or join another. Matches the web's
+    /// forgetPairing.
+    func forgetPairing(uid: String) async throws {
+        try await userRef(uid).setData(["coupleId": FieldValue.delete()], merge: true)
+    }
+
     // MARK: - Sync (§5.2)
 
     /// Mechanism #2: one-shot fetch on launch/foreground, from the server
@@ -155,8 +162,20 @@ final class FirestoreService {
     /// Caller owns the returned registration's lifetime and must call
     /// `.remove()` — SyncCoordinator attaches/detaches this around
     /// scenePhase changes.
-    func listenToCouple(coupleId: String, onChange: @escaping (RelationshipState) -> Void) -> ListenerRegistration {
-        coupleRef(coupleId).addSnapshotListener { snapshot, _ in
+    /// Errors go to `onError` — they used to be dropped, and a pairing this
+    /// account couldn't read left the countdown on "Loading…" for good.
+    func listenToCouple(
+        coupleId: String,
+        onChange: @escaping (RelationshipState) -> Void,
+        onError: @escaping (Error) -> Void
+    ) -> ListenerRegistration {
+        coupleRef(coupleId).addSnapshotListener { snapshot, error in
+            if let error {
+                onError(error)
+                return
+            }
+            // A local write still waiting for its server timestamp doesn't
+            // decode; the confirmed snapshot right behind it does.
             guard let snapshot, let state = try? snapshot.data(as: RelationshipState.self) else { return }
             onChange(state)
         }

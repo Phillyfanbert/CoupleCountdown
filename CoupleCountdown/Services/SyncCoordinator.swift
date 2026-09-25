@@ -14,6 +14,16 @@ import CoupleCountdownKit
 @MainActor
 final class SyncCoordinator: ObservableObject {
     @Published private(set) var state: RelationshipState?
+    /// Why there's nothing to show yet, if loading failed. Cleared as soon
+    /// as any state arrives.
+    @Published private(set) var loadProblem: LoadProblem?
+
+    enum LoadProblem: Equatable {
+        /// Offline, or the server couldn't be reached.
+        case unreachable
+        /// The rules refused: this account isn't in that pairing.
+        case noAccess
+    }
 
     private let firestore: FirestoreService
     private let cache: AppGroupCache
@@ -33,19 +43,28 @@ final class SyncCoordinator: ObservableObject {
     /// what call sites use after making a local write themselves (§5.2's
     /// sync pipeline convention).
     func fetchOnLaunch() async {
-        guard let fetched = try? await firestore.fetchCouple(coupleId: coupleId) else { return }
-        publish(fetched)
+        do {
+            publish(try await firestore.fetchCouple(coupleId: coupleId))
+        } catch {
+            // Keep showing what we have; only an empty screen needs to say why.
+            if state == nil { loadProblem = Self.problem(for: error) }
+        }
     }
 
     /// Mechanism #1 (§5.2): attach while the app is foregrounded, detach
     /// on background — call sites are the app's scenePhase observer.
     func startListening() {
         stopListening()
-        listener = firestore.listenToCouple(coupleId: coupleId) { [weak self] state in
+        listener = firestore.listenToCouple(coupleId: coupleId, onChange: { [weak self] state in
             Task { @MainActor in
                 self?.publish(state)
             }
-        }
+        }, onError: { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.state == nil else { return }
+                self.loadProblem = Self.problem(for: error)
+            }
+        })
     }
 
     func stopListening() {
@@ -67,8 +86,13 @@ final class SyncCoordinator: ObservableObject {
         publish(state)
     }
 
+    private static func problem(for error: Error) -> LoadProblem {
+        (error as? FirestoreErrorCode)?.code == .permissionDenied ? .noAccess : .unreachable
+    }
+
     private func publish(_ newState: RelationshipState) {
         state = newState
+        loadProblem = nil
         cache.write(newState)
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
     }

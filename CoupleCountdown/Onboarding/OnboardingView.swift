@@ -121,6 +121,9 @@ struct OnboardingView: View {
                     Button("Sign out") { authService.signOut() }
                         .font(.footnote)
                         .accessibilityIdentifier("onboardingSignOutButton")
+                    if let signOutError = authService.signOutError {
+                        Text(signOutError).font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
             .padding()

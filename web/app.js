@@ -326,14 +326,27 @@ async function submitAuth({ name, email, password }, error, button) {
   }
 }
 
-function signOutButton() {
-  return h("button", { class: "btn", id: "signOutButton", onclick: async () => {
+/**
+ * A button for an action whose failure must not look like nothing happened
+ * (sign-out and leaving used to fail silently): it says so on the button.
+ */
+function actionButton(id, label, failedLabel, action) {
+  const button = h("button", { class: "btn", id, onclick: async () => {
+    button.disabled = true;
     try {
-      await signOut(auth);
+      await action();
+      button.textContent = label;
     } catch (e) {
-      console.error("Sign-out failed", e);
+      console.error(`${id} failed`, e);
+      button.textContent = failedLabel;
     }
-  } }, "Sign out");
+    button.disabled = false;
+  } }, label);
+  return button;
+}
+
+function signOutButton() {
+  return actionButton("signOutButton", "Sign out", "Couldn't sign out — tap to try again", () => signOut(auth));
 }
 
 // ---------- onboarding ----------
@@ -1115,13 +1128,7 @@ function waitingCard() {
 }
 
 function leavePairingButton() {
-  return h("button", { class: "btn", id: "leavePairingButton", onclick: async () => {
-    try {
-      await S.api.forgetPairing();
-    } catch (e) {
-      console.error("forgetPairing failed", e);
-    }
-  } }, "Leave this pairing");
+  return actionButton("leavePairingButton", "Leave this pairing", "Couldn't leave — check your connection and tap to try again", () => S.api.forgetPairing());
 }
 
 boot();

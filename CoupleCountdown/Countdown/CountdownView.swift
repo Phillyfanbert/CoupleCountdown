@@ -23,6 +23,7 @@ struct CountdownView: View {
     @AppStorage("metUpNotYetFor") private var metUpNotYetFor: Double = 0
     @State private var isConfirmingCancel = false
     @State private var cancelError: String?
+    @State private var leaveError: String?
 
     // Tracks which milestones have already been shown, so reopening the
     // app or the view reloading doesn't re-celebrate the same one every
@@ -239,6 +240,8 @@ struct CountdownView: View {
                 .accessibilityIdentifier("toggleStatusButton")
 
                 ThinkingOfYouButton(coupleId: coupleId)
+            } else if let problem = sync.loadProblem {
+                loadProblemView(problem)
             } else {
                 ProgressView("Loading…")
                     .padding(.top, 80)
@@ -297,6 +300,50 @@ struct CountdownView: View {
             Button("Keep it", role: .cancel) {}
         } message: {
             Text("Its code will stop working, and you can create a new one or join your partner's.")
+        }
+    }
+
+    /// The countdown couldn't load. It used to sit on "Loading…" for good,
+    /// with no way to tell why and no way out.
+    @ViewBuilder
+    private func loadProblemView(_ problem: SyncCoordinator.LoadProblem) -> some View {
+        VStack(spacing: 12) {
+            Text(problem == .noAccess ? "This account can't open that pairing" : "Couldn't load your countdown")
+                .font(.system(.title3, design: .rounded, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("countdownLoadError")
+            Text(problem == .noAccess
+                 ? "Leave it to create a new pairing or join your partner's."
+                 : "Check your connection and try again.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try again") {
+                sync.startListening()
+                Task { await sync.fetchOnLaunch() }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(theme.accentColor)
+            if problem == .noAccess {
+                Button("Leave this pairing", role: .destructive) {
+                    Task { await leaveUnreadablePairing() }
+                }
+                .accessibilityIdentifier("leavePairingButton")
+            }
+            if let leaveError {
+                Text(leaveError).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .padding(.top, 60)
+    }
+
+    private func leaveUnreadablePairing() async {
+        leaveError = nil
+        do {
+            // The account listener (AccountSessionView) then returns every
+            // device on this account to onboarding.
+            try await firestore.forgetPairing(uid: uid)
+        } catch {
+            leaveError = "Couldn't leave — check your connection and try again."
         }
     }
 

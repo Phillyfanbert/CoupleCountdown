@@ -149,6 +149,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
             | tee logs/uitest-output.log
+          # xcodebuild also exits 0 when *no* tests run (say, the test
+          # target dropped out of the scheme) — another way to go green
+          # having tested nothing. Require that tests really ran and passed.
+          grep -Eq "Executed [1-9][0-9]* tests?, with 0 failures" logs/uitest-output.log \
+            || { echo "::error::No UI tests ran"; exit 1; }
 
       - name: Upload UI test result bundle
         if: always()
@@ -246,7 +251,12 @@ jobs:
 
       - name: swift test
         working-directory: CoupleCountdownKit
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee ../swift-test.log
+          # Exits 0 when no tests run, too — require that they did.
+          grep -Eq "Executed [1-9][0-9]* tests?, with 0 failures" ../swift-test.log \
+            || { echo "::error::No Kit tests ran"; exit 1; }
 
   test-web-logic:
     name: Run web client logic tests
@@ -265,10 +275,12 @@ jobs:
       # up across zones, including UTC+13 (New Zealand summer).
       - name: node --test (several time zones)
         run: |
-          set -e
+          set -e -o pipefail
           for tz in UTC America/Los_Angeles America/New_York Asia/Tokyo Pacific/Auckland; do
             echo "== TZ=$tz"
-            TZ=$tz node --test web/logic.test.js
+            TZ=$tz node --test --test-reporter=spec web/logic.test.js | tee web-test.log
+            # Exits 0 when no tests run, too — require that they did.
+            grep -q "ℹ tests [1-9]" web-test.log || { echo "::error::No web tests ran"; exit 1; }
           done
 
   test-firestore-rules:
@@ -292,4 +304,8 @@ jobs:
 
       - name: npm test
         working-directory: firebase
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee rules-test.log
+          # Exits 0 when no tests run, too — require that they did.
+          grep -Eq "[1-9][0-9]* passing" rules-test.log || { echo "::error::No rules tests ran"; exit 1; }

@@ -93,6 +93,9 @@ struct AccountSessionView: View {
                     Button("Try again") { session.restart() }
                         .buttonStyle(.borderedProminent)
                     Button("Sign out") { authService.signOut() }
+                    if let signOutError = authService.signOutError {
+                        Text(signOutError).font(.caption).foregroundStyle(.red)
+                    }
                 }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
