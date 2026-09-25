@@ -171,7 +171,7 @@ label.check input { width: 20px; height: 20px; accent-color: var(--accent); }
 .countdown .target { margin: 12px 0 0; }
 .field.grow { flex: 1; }
 .row > .field { min-width: 0; }
-input[type="time"] {
+input[type="time"], select {
   font: inherit; width: 100%; padding: 13px 14px; border-radius: 14px; color: var(--ink);
   border: 1.5px solid var(--card-border); background: var(--field);
 }

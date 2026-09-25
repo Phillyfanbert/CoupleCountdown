@@ -12,6 +12,11 @@ import CoupleCountdownKit
 /// dates in the past.
 struct VisitPlannerSheet: View {
     let title: String
+    /// The other partner, when they're in a different time zone: the time can
+    /// then be entered as theirs. It used to be read silently in this
+    /// phone's zone, so a traveler entering the landing time at the other end
+    /// ended the countdown hours early or late.
+    let partner: PartnerProfile?
     let errorMessage: String?
     let onSave: (_ start: Date, _ note: String?) async -> Void
     let onCancel: () -> Void
@@ -19,6 +24,7 @@ struct VisitPlannerSheet: View {
     @State private var start: Date
     @State private var note = ""
     @State private var isSaving = false
+    @State private var inPartnersTime = false
 
     @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
     private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
@@ -27,12 +33,17 @@ struct VisitPlannerSheet: View {
     init(
         title: String,
         initialStart: Date? = nil,
+        partner: PartnerProfile? = nil,
         errorMessage: String?,
         onSave: @escaping (_ start: Date, _ note: String?) async -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.title = title
         self.errorMessage = errorMessage
+        // Only worth offering when their zone differs from this phone's.
+        self.partner = partner.flatMap {
+            $0.timeZoneIdentifier == TimeZone.autoupdatingCurrent.identifier ? nil : $0
+        }
         self.onSave = onSave
         self.onCancel = onCancel
         _start = State(initialValue: initialStart ?? (Self.isQuickVisitTest ? Self.quickTestStart() : Self.defaultStart()))
@@ -54,11 +65,43 @@ struct VisitPlannerSheet: View {
         return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: weekAhead) ?? weekAhead
     }
 
+    private var partnerZone: TimeZone {
+        partner.flatMap { TimeZone(identifier: $0.timeZoneIdentifier) } ?? .autoupdatingCurrent
+    }
+
+    private static func when(in zone: TimeZone) -> Date.FormatStyle {
+        Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: zone)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                if let partner {
+                    Picker("Whose time?", selection: $inPartnersTime) {
+                        Text("Mine").tag(false)
+                        Text("\(partner.displayName)'s").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("visitZonePicker")
+                    // Switching keeps the time as typed: 6:30 PM becomes 6:30 PM theirs.
+                    .onChange(of: inPartnersTime) { wasPartners, isPartners in
+                        start = MeetupPlanner.sameWallTime(
+                            start,
+                            from: wasPartners ? partnerZone : .autoupdatingCurrent,
+                            to: isPartners ? partnerZone : .autoupdatingCurrent
+                        )
+                    }
+                }
                 DatePicker("When", selection: $start, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    .environment(\.timeZone, inPartnersTime ? partnerZone : .autoupdatingCurrent)
                     .accessibilityIdentifier("nextMeetupDatePicker")
+                if let partner {
+                    // The same moment for both of them, so a mix-up shows before saving.
+                    Text("For you: \(start.formatted(Self.when(in: .autoupdatingCurrent)))\nFor \(partner.displayName): \(start.formatted(Self.when(in: partnerZone)))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("visitZoneSummary")
+                }
                 TextField("Note (optional) — e.g. Sam lands at LAX", text: $note)
                     .accessibilityIdentifier("visitNoteField")
                 // Shown inside the sheet: a save failure shown only on the

@@ -10,6 +10,8 @@ import {
   countdownParts,
   dayFromStored,
   daysUntil,
+  durationLabel,
+  formatStatDays,
   defaultVisitStart,
   localISODate,
   monthCells,
@@ -20,9 +22,13 @@ import {
   pingHeadline,
   relativeDayLabel,
   resolvedNextMeetup,
+  reunionMessage,
+  separations,
   storedFromLocalDay,
   timeAgo,
   unseenPings,
+  visitMetEarly,
+  zonedTime,
 } from "./logic.js";
 
 const DAY = 86_400_000;
@@ -176,4 +182,64 @@ test("timeAgo", () => {
   assert.equal(ago(2 * 3_600_000), "2 hours ago");
   assert.equal(ago(26 * 3_600_000), "yesterday");
   assert.equal(ago(3 * 86_400_000), "3 days ago");
+});
+
+// ---------- time apart (same cases as SeparationTests in the Swift suite) ----------
+const t0 = new Date(1_800_000_000_000);
+const dayN = (n) => new Date(t0.getTime() + n * DAY);
+const ev = (type, at) => ({ type, timestamp: at });
+
+test("pairing starts the first stretch apart", () => {
+  const events = [ev("became_together", dayN(44))];
+  const stats = computeStats(events, dayN(50), t0);
+  assert.ok(Math.abs(stats.totalDaysApart - 44) < 1e-6);
+  assert.ok(Math.abs(stats.totalDaysTogether - 6) < 1e-6);
+  assert.equal(computeStats(events, dayN(50)).totalDaysApart, 0); // older pairings: as before
+  assert.deepEqual(separations([], t0), [{ start: t0, end: null }]);
+});
+
+test("separations run from parting to reunion and ignore repeats", () => {
+  const events = [
+    ev("became_together", dayN(44)), ev("became_together", dayN(44.001)),
+    ev("became_apart", dayN(50)), ev("became_apart", dayN(50.001)),
+    ev("became_together", dayN(80)), ev("became_apart", dayN(85)),
+  ];
+  assert.deepEqual(separations(events, t0), [
+    { start: t0, end: dayN(44) },
+    { start: dayN(50), end: dayN(80) },
+    { start: dayN(85), end: null },
+  ]);
+});
+
+test("duration labels, stat days, and reunion messages", () => {
+  assert.equal(durationLabel(20_000), "less than a minute");
+  assert.equal(durationLabel(60_000), "1 minute");
+  assert.equal(durationLabel(5 * 3_600_000), "5 hours");
+  assert.equal(durationLabel(DAY + 5 * 3_600_000), "1 day, 5 hours");
+  assert.equal(durationLabel(2 * DAY), "2 days");
+  assert.equal(durationLabel(44.5 * DAY), "44 days");
+  assert.equal(formatStatDays(0.83), "0.8");
+  assert.equal(formatStatDays(23.6), "24");
+  assert.equal(reunionMessage(null, 44 * DAY), "Congratulations! You're together again after 44 days apart 💞");
+  assert.equal(reunionMessage(null, 30_000), "Congratulations! You're together again 💞");
+  assert.equal(reunionMessage("Sam", 2 * DAY), "Sam says you're together after 2 days apart! Congratulations 💞");
+  assert.equal(reunionMessage("Sam", null), "Sam says you're together! Congratulations 💞");
+});
+
+test("meeting early finds the visit that was counted down to", () => {
+  const nowT = new Date(1_800_000_000_000);
+  const planned = { id: "v", start: new Date(nowT.getTime() + DAY) };
+  const later = { id: "w", start: new Date(nowT.getTime() + 30 * DAY) };
+  assert.equal(visitMetEarly(planned.start, [later, planned], nowT)?.id, "v");
+  assert.equal(visitMetEarly(new Date(nowT.getTime() - 60_000), [planned], nowT), null);
+  assert.equal(visitMetEarly(null, [planned], nowT), null);
+});
+
+test("a time entered in another zone is that zone's wall clock, wherever this runs", () => {
+  assert.equal(zonedTime(2026, 10, 1, 18, 30, "America/Chicago").toISOString(), "2026-10-01T23:30:00.000Z");
+  assert.equal(zonedTime(2026, 10, 1, 18, 30, "Asia/Tokyo").toISOString(), "2026-10-01T09:30:00.000Z");
+  // Just after a spring-forward (US: Mar 8, 2026, 2 AM → 3 AM): 3:30 AM is EDT.
+  assert.equal(zonedTime(2026, 3, 8, 3, 30, "America/New_York").toISOString(), "2026-03-08T07:30:00.000Z");
+  // Auckland in summer (UTC+13).
+  assert.equal(zonedTime(2026, 1, 15, 9, 0, "Pacific/Auckland").toISOString(), "2026-01-14T20:00:00.000Z");
 });

@@ -52,6 +52,27 @@ public enum MeetupPlanner {
 
     /// A picked date-and-time trimmed to the minute, so the same visit
     /// compares equal after a round trip through Firestore.
+    /// Saying you're together *before* the planned visit's start means that
+    /// visit is happening now. Returns the visit the countdown pointed at if
+    /// it's still ahead, so it can be moved to now — otherwise "Leaving
+    /// again" before its original time counted down to it all over again.
+    /// Mirrors visitMetEarly in web/logic.js.
+    public static func visitMetEarly(current: Date?, visits: [Visit], now: Date = Date()) -> Visit? {
+        guard let current, current > now else { return nil }
+        return visits.first { abs($0.start.timeIntervalSince(current)) < 1 }
+    }
+
+    /// The same wall-clock time in another time zone: 6:30 PM entered as
+    /// your time, switched to your partner's, stays 6:30 PM — theirs.
+    public static func sameWallTime(_ date: Date, from source: TimeZone, to target: TimeZone) -> Date {
+        var sourceCalendar = Calendar(identifier: .gregorian)
+        sourceCalendar.timeZone = source
+        var targetCalendar = Calendar(identifier: .gregorian)
+        targetCalendar.timeZone = target
+        let parts = sourceCalendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        return targetCalendar.date(from: parts) ?? date
+    }
+
     public static func normalized(_ start: Date) -> Date {
         Date(timeIntervalSince1970: (start.timeIntervalSince1970 / 60).rounded(.down) * 60)
     }

@@ -19,6 +19,10 @@ public struct RelationshipState: Codable, Equatable, Sendable {
     public var partnerProfiles: [String: PartnerProfile]
     public var lastUpdatedBy: String
     public var lastUpdatedAt: Date
+    /// When the pairing was created. Pairings start apart, so this is where
+    /// the first stretch apart begins — before any together/apart event
+    /// exists. Nil for pairings made before it was recorded.
+    public var pairedAt: Date?
 
     public init(
         status: Status,
@@ -26,7 +30,8 @@ public struct RelationshipState: Codable, Equatable, Sendable {
         participantUIDs: [String],
         partnerProfiles: [String: PartnerProfile],
         lastUpdatedBy: String,
-        lastUpdatedAt: Date
+        lastUpdatedAt: Date,
+        pairedAt: Date? = nil
     ) {
         self.status = status
         self.nextMeetupDate = nextMeetupDate
@@ -34,5 +39,6 @@ public struct RelationshipState: Codable, Equatable, Sendable {
         self.partnerProfiles = partnerProfiles
         self.lastUpdatedBy = lastUpdatedBy
         self.lastUpdatedAt = lastUpdatedAt
+        self.pairedAt = pairedAt
     }
 }

@@ -90,6 +90,42 @@ export function resolvedNextMeetup(current, visits, removed = null, now = new Da
   return upcoming < cur ? upcoming : cur;
 }
 
+/**
+ * Saying you're together *before* the planned visit's start: that visit is
+ * happening now. Returns the visit the countdown pointed at if it's still
+ * ahead, so it can be moved to now — otherwise "Leaving again" before its
+ * original time counted down to it again. Mirrors MeetupPlanner.visitMetEarly.
+ */
+export function visitMetEarly(current, visits, now = new Date()) {
+  if (!current || current <= now) return null;
+  return visits.find((v) => Math.abs(v.start - current) < 1000) ?? null;
+}
+
+/** Wall-clock parts of `date` in an IANA time zone. */
+function partsIn(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(date);
+  const get = (type) => Number(parts.find((p) => p.type === type).value);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour") % 24, minute: get("minute") };
+}
+
+/**
+ * The instant when the clock in `timeZone` reads year-month-day hour:minute
+ * (month 1–12) — for entering a visit in the partner's time. Two passes so
+ * a daylight-saving change between the guess and the answer can't skew it.
+ */
+export function zonedTime(year, month, day, hour, minute, timeZone) {
+  const wall = Date.UTC(year, month - 1, day, hour, minute);
+  const offset = (t) => {
+    const p = partsIn(new Date(t), timeZone);
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute) - Math.floor(t / 60_000) * 60_000;
+  };
+  let t = wall - offset(wall);
+  t = wall - offset(t);
+  return new Date(t);
+}
+
 /** Trim a picked date-time to the minute, so it compares equal after a Firestore round trip. */
 export function normalizedStart(date) {
   return new Date(Math.floor(date.getTime() / 60_000) * 60_000);
@@ -160,14 +196,27 @@ export function countdownParts(target, now = new Date()) {
 }
 
 /**
- * Same algorithm as CumulativeStatsCalculator.swift: each event owns the span
- * until the next event (the last one until `now`). Events without a timestamp
- * (a write still pending on the server) are skipped.
+ * Events oldest first, preceded by the implicit "apart" at pairing — pairings
+ * start apart, but no event marks it. Events without a timestamp (a write
+ * still pending on the server) are skipped.
  */
-export function computeStats(events, now = new Date()) {
+function timeline(events, pairedAt) {
   const sorted = events
     .filter((e) => e.timestamp instanceof Date)
     .sort((a, b) => a.timestamp - b.timestamp);
+  if (pairedAt && (!sorted.length || pairedAt < sorted[0].timestamp)) {
+    sorted.unshift({ type: "became_apart", timestamp: pairedAt });
+  }
+  return sorted;
+}
+
+/**
+ * Same algorithm as CumulativeStatsCalculator.swift: each event owns the span
+ * until the next event (the last one until `now`). `pairedAt` starts the
+ * first span, so the first separation counts.
+ */
+export function computeStats(events, now = new Date(), pairedAt = null) {
+  const sorted = timeline(events, pairedAt);
   let together = 0;
   let apart = 0;
   sorted.forEach((event, i) => {
@@ -178,6 +227,51 @@ export function computeStats(events, now = new Date()) {
     else if (event.type === "became_apart") apart += duration;
   });
   return { totalDaysTogether: together / DAY_MS, totalDaysApart: apart / DAY_MS };
+}
+
+/**
+ * Every stretch apart, oldest first: { start, end } from each parting (or the
+ * pairing) to the reunion that ended it; end is null while still apart.
+ * Repeats of the same event don't start a new one. Mirrors
+ * CumulativeStatsCalculator.separations.
+ */
+export function separations(events, pairedAt = null) {
+  const result = [];
+  let openSince = null;
+  for (const event of timeline(events, pairedAt)) {
+    if (event.type === "became_apart") {
+      if (!openSince) openSince = event.timestamp;
+    } else if (event.type === "became_together" && openSince) {
+      result.push({ start: openSince, end: event.timestamp });
+      openSince = null;
+    }
+  }
+  if (openSince) result.push({ start: openSince, end: null });
+  return result;
+}
+
+/** "3 days", "1 day, 5 hours", "5 hours", "12 minutes", "less than a minute". Mirrors CountdownFormatter.durationLabel. */
+export function durationLabel(ms) {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  const days = Math.floor(minutes / 1440), hours = Math.floor((minutes % 1440) / 60), mins = minutes % 60;
+  const count = (n, unit) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  if (days >= 3) return count(days, "day");
+  if (days >= 1) return hours > 0 ? `${count(days, "day")}, ${count(hours, "hour")}` : count(days, "day");
+  if (hours >= 1) return count(hours, "hour");
+  if (mins >= 1) return count(mins, "minute");
+  return "less than a minute";
+}
+
+/** A stats figure in days, same on both clients: "0.8" under 10, "23" from there. */
+export function formatStatDays(days) {
+  return days < 10 ? days.toFixed(1) : String(Math.round(days));
+}
+
+/** The reunion congratulations, with how long you were apart when it's an hour or more. Mirrors CountdownFormatter.reunionMessage. */
+export function reunionMessage(partnerName, apartForMs) {
+  const after = apartForMs != null && apartForMs >= 3_600_000 ? ` after ${durationLabel(apartForMs)} apart` : "";
+  if (partnerName) return `${partnerName} says you're together${after}! Congratulations 💞`;
+  return `Congratulations! You're together again${after} 💞`;
 }
 
 /** "Sam: 9:14 PM CDT" — display-only partner clock (DESIGN.md §9.1). */

@@ -28,17 +28,42 @@ final class CountdownViewModel: ObservableObject {
         self.uid = uid
     }
 
-    /// Apart → together. Returns whether the write succeeded — callers use
-    /// this to drive the instant local widget refresh from §5.2's sync
-    /// pipeline convention (SyncCoordinator.applyLocalWrite).
-    func markTogether() async -> Bool {
+    /// Apart → together. Returns the new state for the instant local update
+    /// from §5.2's sync pipeline convention (SyncCoordinator.applyLocalWrite).
+    /// The write is sent without waiting for the server (see
+    /// FirestoreService.setStatus), so this works offline too.
+    ///
+    /// Meeting before the planned visit's time moves that visit to now: it's
+    /// happening now, and "Leaving again" mustn't count down to it again.
+    func markTogether(current: RelationshipState) async -> RelationshipState {
         errorMessage = nil
-        do {
-            try await firestore.setStatus(.together, coupleId: coupleId, uid: uid, nextMeetupDate: nil)
-            return true
-        } catch {
-            errorMessage = "Couldn't update — check your connection and try again."
-            return false
+        let now = MeetupPlanner.normalized(Date())
+        var metEarly: Visit?
+        if let planned = current.nextMeetupDate, planned > now,
+           let visits = try? await firestore.fetchVisits(coupleId: coupleId) {
+            metEarly = MeetupPlanner.visitMetEarly(current: planned, visits: visits, now: now)
+        }
+        firestore.setStatus(
+            .together,
+            coupleId: coupleId,
+            uid: uid,
+            nextMeetupDate: metEarly == nil ? nil : now,
+            movingVisit: metEarly.map { (id: $0.id, start: now) },
+            onFailure: reportFailure
+        )
+        var updated = current
+        updated.status = .together
+        if metEarly != nil { updated.nextMeetupDate = now }
+        updated.lastUpdatedBy = uid
+        updated.lastUpdatedAt = Date()
+        return updated
+    }
+
+    /// A status change the server rejected, after the app already moved on.
+    /// nonisolated: Firestore calls it from its own completion handler.
+    nonisolated private func reportFailure(_ error: Error) {
+        Task { @MainActor [weak self] in
+            self?.errorMessage = "Couldn't save that change — check your connection and try again."
         }
     }
 
@@ -58,7 +83,7 @@ final class CountdownViewModel: ObservableObject {
                 visitSheetPurpose = .leaving
                 return nil
             }
-            try await firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next.start)
+            firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next.start, onFailure: reportFailure)
             return next.start
         } catch {
             errorMessage = "Couldn't update — check your connection and try again."
@@ -86,7 +111,7 @@ final class CountdownViewModel: ObservableObject {
             switch purpose {
             case .leaving:
                 let next = MeetupPlanner.nextUpcoming(visits)?.start ?? visit.start
-                try await firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next)
+                firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next, onFailure: reportFailure)
                 updated.status = .apart
                 updated.nextMeetupDate = next
             case .plan, .change:

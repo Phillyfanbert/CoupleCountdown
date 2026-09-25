@@ -84,7 +84,10 @@ final class FirestoreService {
             participantUIDs: [uid],
             partnerProfiles: [uid: PartnerProfile(displayName: displayName, timeZoneIdentifier: timeZoneIdentifier)],
             lastUpdatedBy: uid,
-            lastUpdatedAt: Date()
+            lastUpdatedAt: Date(),
+            // Pairings start apart; this is where the first stretch apart
+            // begins for the stats (no event marks it).
+            pairedAt: Date()
         )
         let batch = db.batch()
         try batch.setData(from: state, forDocument: coupleRef(coupleId))
@@ -174,9 +177,13 @@ final class FirestoreService {
                 onError(error)
                 return
             }
-            // A local write still waiting for its server timestamp doesn't
-            // decode; the confirmed snapshot right behind it does.
-            guard let snapshot, let state = try? snapshot.data(as: RelationshipState.self) else { return }
+            // .estimate, so this device's own change shows the moment it's
+            // made — even offline, still queued for the server. Pending
+            // snapshots used to fail to decode and were dropped, so an offline
+            // "Yes, we're together!" changed nothing on screen.
+            guard let snapshot,
+                  let state = try? snapshot.data(as: RelationshipState.self, with: .estimate)
+            else { return }
             onChange(state)
         }
     }
@@ -187,12 +194,23 @@ final class FirestoreService {
     /// disagree (DESIGN.md §8 "Write atomicity") — a dropped connection
     /// between two separate writes could otherwise leave them
     /// inconsistent.
+    ///
+    /// Returns as soon as the change is applied on this device, without
+    /// waiting for the server: offline (an airport arrivals hall) the app
+    /// moves on at once and Firestore sends it when the connection is back.
+    /// Waiting used to leave "Yes, we're together!" doing nothing visible
+    /// until then. `onFailure` hears if the server rejects it.
+    ///
+    /// `movingVisit` also moves a visit's start in the same write — used when
+    /// a couple meets before the planned time (MeetupPlanner.visitMetEarly).
     func setStatus(
         _ status: RelationshipState.Status,
         coupleId: String,
         uid: String,
-        nextMeetupDate: Date?
-    ) async throws {
+        nextMeetupDate: Date?,
+        movingVisit: (id: String, start: Date)? = nil,
+        onFailure: @escaping (Error) -> Void
+    ) {
         let batch = db.batch()
 
         var fields: [String: Any] = [
@@ -205,18 +223,30 @@ final class FirestoreService {
         }
         batch.updateData(fields, forDocument: coupleRef(coupleId))
 
+        if let movingVisit {
+            batch.updateData(
+                ["start": Timestamp(date: movingVisit.start)],
+                forDocument: coupleRef(coupleId).collection("visits").document(movingVisit.id)
+            )
+        }
+
         let eventType: RelationshipEvent.EventType = status == .together ? .becameTogether : .becameApart
         let eventRef = coupleRef(coupleId).collection("events").document()
         batch.setData(
             [
                 "type": eventType.rawValue,
-                "timestamp": FieldValue.serverTimestamp(),
+                // The moment it was tapped, not when the server gets it: a
+                // reunion confirmed offline would otherwise be logged hours
+                // late, whenever the phone reconnected.
+                "timestamp": Timestamp(date: Date()),
                 "triggeredBy": uid,
             ],
             forDocument: eventRef
         )
 
-        try await batch.commit()
+        batch.commit { error in
+            if let error { onFailure(error) }
+        }
     }
 
     /// Sets (or, with nil, clears) the meetup the main countdown and the

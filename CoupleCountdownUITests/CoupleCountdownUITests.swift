@@ -459,16 +459,32 @@ final class CoupleCountdownUITests: XCTestCase {
 
     // MARK: - Stats
 
-    func testStatsScreenLoads() {
+    func testStatsTrackTimeApartFromPairingToReunion() {
+        // The stretch apart starts at pairing (it used to go uncounted until
+        // the first "together"), and a reunion closes it.
         let app = launchFreshApp()
         completeOnboardingByCreating(app)
 
-        app.buttons["statsNavLink"].tap()
+        let apartFor = app.staticTexts["apartForText"]
+        XCTAssertTrue(apartFor.waitForExistence(timeout: 15), "The countdown should say how long you've been apart")
+        XCTAssertTrue(apartFor.label.hasPrefix("Apart for"), "Unexpected: \(apartFor.label)")
 
-        let daysTogether = app.staticTexts["daysTogetherStat"]
-        let daysApart = app.staticTexts["daysApartStat"]
-        let loaded = daysTogether.waitForExistence(timeout: 15) || daysApart.waitForExistence(timeout: 5)
-        XCTAssertTrue(loaded, "Stats screen never finished loading — fetchEvents()/CumulativeStatsCalculator likely failed for a brand-new couple with zero events")
+        let stat = { (id: String) in app.descendants(matching: .any)[id] }
+        app.buttons["statsNavLink"].tap()
+        XCTAssertTrue(stat("daysApartStat").waitForExistence(timeout: 15), "Stats never loaded")
+        XCTAssertTrue(stat("daysTogetherStat").exists)
+        XCTAssertTrue(stat("currentSeparationStat").waitForExistence(timeout: 5), "A new pairing is apart right now")
+        XCTAssertFalse(stat("lastSeparationStat").exists)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        tapWhenReady(app.buttons["toggleStatusButton"], in: app) // together
+        dismissCelebration(app)
+        XCTAssertTrue(app.staticTexts["togetherText"].waitForExistence(timeout: 10))
+
+        tapWhenReady(app.buttons["statsNavLink"], in: app)
+        XCTAssertTrue(stat("lastSeparationStat").waitForExistence(timeout: 15), "The stretch apart should be recorded once you're together")
+        XCTAssertFalse(stat("currentSeparationStat").exists, "Together: nothing apart right now")
+        XCTAssertTrue(stat("reunionsStat").exists)
     }
 
     // MARK: - Settings / theme

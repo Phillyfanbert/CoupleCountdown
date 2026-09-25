@@ -26,8 +26,8 @@ the same account and data.
 The CI runs these tests on every push:
 
 - 16 XCUITest UI tests against the live backend;
-- 28 unit tests;
-- 31 Security Rules tests;
+- 34 unit tests;
+- 33 Security Rules tests;
 - the web client's date logic, checked in five time zones.
 
 The full architecture, decisions, and rationale live in
@@ -99,7 +99,9 @@ below.
   your partner's app is open, they're congratulated too. "Not yet" keeps
   the question on screen and lets you move the time.
 - **Shared calendar:** plan any number of visits, each with a date, a time,
-  and an optional note, and see them on a month grid. The countdown and
+  and an optional note, and see them on a month grid. When your partner is
+  in another time zone, you can enter the time as theirs, and the planner
+  shows it for both of you. The countdown and
   widget always follow the next planned visit, so tapping "Leaving again"
   switches straight to it.
 - **Important dates** (anniversaries, birthdays), optionally yearly, with
@@ -110,8 +112,12 @@ below.
 - **"Thinking of you":** one tap sends your partner a nudge. It appears on
   their countdown screen, and on their iPhone widget, until they dismiss it
   or send one back from any of their devices.
-- **Stats:** total days together and apart, derived from that log.
-- **Each partner's current local time** alongside the countdown.
+- **Time apart, tracked** from the moment you pair: "Apart for 23 days so
+  far" on the countdown, how long you were apart in the congratulations,
+  and in Stats the current stretch, the last and longest ones, the number
+  of reunions, and total days together and apart.
+- **Each partner's current local time**, kept live, alongside the
+  countdown. It follows you when you travel.
 - **Milestone celebrations** for round numbers of days together (iPhone
   app).
 - **Themes** with light and dark variants.

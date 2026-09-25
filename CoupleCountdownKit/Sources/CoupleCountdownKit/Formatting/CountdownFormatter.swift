@@ -38,6 +38,40 @@ public enum CountdownFormatter {
         return Parts(days: total / 86_400, hours: total % 86_400 / 3_600, minutes: total % 3_600 / 60, seconds: total % 60)
     }
 
+    /// How long a stretch apart has lasted: "3 days", "1 day, 5 hours",
+    /// "5 hours", "12 minutes", "less than a minute". Mirrors durationLabel
+    /// in web/logic.js.
+    public static func durationLabel(_ seconds: TimeInterval) -> String {
+        let minutes = Int(max(0, seconds) / 60)
+        let days = minutes / 1_440, hours = minutes % 1_440 / 60, mins = minutes % 60
+        func count(_ n: Int, _ unit: String) -> String { "\(n) \(unit)\(n == 1 ? "" : "s")" }
+        if days >= 3 { return count(days, "day") }
+        if days >= 1 { return hours > 0 ? "\(count(days, "day")), \(count(hours, "hour"))" : count(days, "day") }
+        if hours >= 1 { return count(hours, "hour") }
+        if mins >= 1 { return count(mins, "minute") }
+        return "less than a minute"
+    }
+
+    /// A stats figure in days, the same on both clients: one decimal under
+    /// 10 ("0.8"), whole days from there ("23"). The iPhone used to round to
+    /// whole days, so the first day read as 0 while the web showed 0.8.
+    public static func statDays(_ days: Double) -> String {
+        days < 10 ? String(format: "%.1f", days) : String(Int(days.rounded()))
+    }
+
+    /// The reunion congratulations, with how long they were apart when that's
+    /// known and worth saying (an hour or more). `partnerName` is set when the
+    /// partner is the one who said so. Mirrors reunionMessage in web/logic.js.
+    public static func reunionMessage(partnerName: String? = nil, apartFor: TimeInterval?) -> String {
+        let after = apartFor.flatMap { $0 >= 3_600 ? " after \(durationLabel($0)) apart" : nil } ?? ""
+        if let partnerName {
+            return after.isEmpty
+                ? "\(partnerName) says you're together! Congratulations 💞"
+                : "\(partnerName) says you're together\(after)! Congratulations 💞"
+        }
+        return "Congratulations! You're together again\(after) 💞"
+    }
+
     /// For the widget, which can't redraw every second: the whole days left
     /// (drawn as text) and when the current partial day runs out (the end of
     /// a live `Text(timerInterval:)` showing the hours, minutes, and seconds).

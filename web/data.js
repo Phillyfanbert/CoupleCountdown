@@ -65,6 +65,9 @@ export function makeApi(db, uid) {
         partnerProfiles: { [uid]: { displayName, timeZoneIdentifier: timeZone } },
         lastUpdatedBy: uid,
         lastUpdatedAt: Timestamp.now(),
+        // Pairings start apart: the first stretch apart runs from here (no
+        // event marks it), so the stats count it.
+        pairedAt: Timestamp.now(),
       });
       batch.set(userRef(), { displayName, coupleId }, { merge: true });
       await batch.commit();
@@ -117,8 +120,14 @@ export function makeApi(db, uid) {
       await setDoc(userRef(), { coupleId: deleteField() }, { merge: true });
     },
 
-    /** Status change + history event in one batch so they can never disagree (§8). */
-    async setStatus(coupleId, status, nextMeetupDate = null) {
+    /**
+     * Status change + history event in one batch so they can never disagree
+     * (§8). The listener shows it at once; the returned promise settles when
+     * the server has it — callers shouldn't wait on it to move on, or offline
+     * nothing happens until the connection is back. `moveVisit` ({ id, start })
+     * also moves a visit that's happening early, in the same write.
+     */
+    setStatus(coupleId, status, nextMeetupDate = null, moveVisit = null) {
       const batch = writeBatch(db);
       const fields = {
         status,
@@ -127,12 +136,17 @@ export function makeApi(db, uid) {
       };
       if (nextMeetupDate) fields.nextMeetupDate = Timestamp.fromDate(nextMeetupDate);
       batch.update(coupleRef(coupleId), fields);
+      if (moveVisit) {
+        batch.update(doc(collection(coupleRef(coupleId), "visits"), moveVisit.id), { start: Timestamp.fromDate(moveVisit.start) });
+      }
       batch.set(doc(collection(coupleRef(coupleId), "events")), {
         type: status === "together" ? "became_together" : "became_apart",
-        timestamp: serverTimestamp(),
+        // When it was tapped, not when the server gets it: a reunion
+        // confirmed offline would otherwise be logged whenever it reconnected.
+        timestamp: Timestamp.now(),
         triggeredBy: uid,
       });
-      await batch.commit();
+      return batch.commit();
     },
 
     /** Sets (or, with null, clears) what the countdown follows, without changing status. */

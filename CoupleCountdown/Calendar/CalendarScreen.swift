@@ -10,6 +10,8 @@ import CoupleCountdownKit
 /// one is. The main countdown follows the next planned visit.
 struct CalendarScreen: View {
     let coupleId: String
+    /// The other partner (name and time zone), for entering a visit in their time.
+    let partner: PartnerProfile?
     /// Hands the updated couple state back to the countdown screen's sync,
     /// so its countdown and the widget update at once when a visit changes
     /// the next meetup (§5.2's sync pipeline convention).
@@ -187,6 +189,7 @@ struct CalendarScreen: View {
             VisitPlannerSheet(
                 title: "Plan a visit ✈️",
                 initialStart: selectedDayStart,
+                partner: partner,
                 errorMessage: visitError,
                 onSave: { start, note in await saveVisit(start: start, note: note) },
                 onCancel: { isShowingPlanVisit = false }

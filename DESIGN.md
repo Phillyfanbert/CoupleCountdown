@@ -52,9 +52,9 @@ the pre-build plan (v0.3). §0 summarizes what was actually built, and
   Apple ID (§13).
 - **Tests in CI:**
   - 16 XCUITests against the live backend;
-  - 28 `CoupleCountdownKit` unit tests;
-  - 31 Security Rules tests on the emulator;
-  - 21 web logic tests, run in five time zones.
+  - 34 `CoupleCountdownKit` unit tests;
+  - 33 Security Rules tests on the emulator;
+  - 26 web logic tests, run in five time zones.
 
 **Known gaps (not built, or not verified yet):**
 
@@ -308,6 +308,8 @@ couples/{coupleId}                      // coupleId is the human-shareable join 
   - codeExpiresAt: Timestamp?           // legacy: earlier builds wrote it; codes
                                         // don't expire (§5.3 step 6), ignored
   - closed: Bool?                       // cancelled before anyone joined (§7.5)
+  - pairedAt: Timestamp?                // when the pairing was created: the
+                                        // start of the first stretch apart (§7.2)
 
 users/{uid}                             // one per account; owner-only (§5.3 note)
   - displayName: String
@@ -550,7 +552,7 @@ failure mode for that).
    *(As built: the snippet above is the original v1. The live file adds
    owner-only `users/{uid}` records and refuses joining a `closed` pairing.
    It also allows `closed` to be set only while nobody has joined. The suite
-   is now 31 tests, run in CI on every push.)*
+   is now 33 tests, run in CI on every push.)*
 6. **Guessing-window mitigation**: at creation, set `codeExpiresAt: now +
    48h` on the couple doc and register it with a Firestore TTL policy
    (free on Spark, no Cloud Function — verified in §5.1). When the second
@@ -836,6 +838,27 @@ between consecutive status changes. Purely client-side computation over
 data already being kept for Option A — no schema or sync changes. Backend
 change from v0.1 doesn't affect this feature at all.
 
+**As built:** the stats track each stretch apart, from parting to being
+together again, not just totals.
+
+- **Pairing time:** pairings start apart, but no event marks that, so the
+  whole first separation used to be missing from "Days apart". The couple
+  doc now records `pairedAt`, and the calculators treat it as an implicit
+  "became apart".
+- **Separations:** `CumulativeStatsCalculator.separations` (Swift) and
+  `separations` (web/logic.js), unit-tested alike, turn the log into
+  stretches apart. A repeated event, such as both partners tapping at once,
+  doesn't start a new one.
+- **Where they show:** "Apart for 23 days so far" on the countdown while
+  apart; "…after 44 days apart" in the reunion congratulations (for an
+  hour or more); and in Stats the current stretch, the last one, the
+  longest, and the number of reunions.
+- **Number format:** both clients format days the same way (one decimal
+  under 10). The iPhone used to round to whole days.
+- **Event time:** events record the moment of the tap, not the server's
+  receipt time. A reunion confirmed offline would otherwise be logged
+  whenever the phone reconnected.
+
 ### 7.3 Milestone celebration
 
 A local, client-side-only animation (confetti, haptic, or similar) fired
@@ -955,6 +978,24 @@ separate calls — otherwise a dropped connection between the two writes
 could leave the current status and the history log disagreeing about what
 happened. Cheap to get right up front, easy to overlook.
 
+**As built, also:**
+
+- **Optimistic writes:** a status change applies on the device at once and
+  is sent without waiting for the server. The iPhone listener decodes
+  pending writes with estimated server timestamps. Offline (say, an
+  arrivals hall) the screen changes straight away and Firestore sends the
+  change on reconnect. Before, an offline "Yes, we're together!" did
+  nothing visible.
+- **One-way confirm:** "Yes, we're together!" only ever moves *to*
+  together. It used to call the toggle, so a Yes tapped just after the
+  partner's ran "Leaving again".
+- **Double taps:** the status buttons pause for a second after each change,
+  because the main button swaps its label in place.
+- **Meeting early:** saying you're together before the planned visit's time
+  moves that visit to now, in the same batch (`MeetupPlanner.visitMetEarly`).
+  Otherwise "Leaving again" before the original time counted down to the
+  same visit again.
+
 ## 9. Visual design direction
 
 - Custom display numeral font for the countdown digits (rounded or serif,
@@ -985,7 +1026,14 @@ keeps this accurate in practice almost all the time.
 
 - Backed by `partnerProfiles[uid].timeZoneIdentifier` (§5.1), refreshed from
   `TimeZone.current.identifier` on each app launch and written back to
-  Firestore like any other field.
+  Firestore like any other field. *(As built: it was only ever written at
+  pairing, until a review caught it. It's now refreshed on launch, on
+  returning to the app or tab, and when the phone's time zone changes. It's
+  deliberately not refreshed on every update, so two of one person's
+  devices in different zones can't ping-pong. The clocks now redraw every
+  minute; they used to freeze at whatever time the screen was drawn. The
+  visit planner offers "Whose time?" when the partner's zone differs, and
+  shows the time for both of them.)*
 - Display-only: does not change how `nextMeetupDate` is stored (still UTC)
   or how the countdown itself is computed — only how the *current time*
   readout is formatted per partner.
@@ -1039,7 +1087,7 @@ keeps this accurate in practice almost all the time.
   routine software update (Sonoma 14.6.1 → Sequoia/Tahoe) before installing
   the latest Xcode.
 - **Firestore Security Rules** (§5.3): written, run against the local
-  emulator, 18/18 tests passing at the time, now 31 and run in CI on every
+  emulator, 18/18 tests passing at the time, now 33 and run in CI on every
   push (`firebase/test/rules.test.js`) — this
   needed no Apple hardware at all, so it was done ahead of the
   device-bound items above rather than waiting on them. Found and fixed a

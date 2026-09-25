@@ -260,6 +260,38 @@ describe('couples/{coupleId}/{sub=**} — subcollections', () => {
   });
 });
 
+describe('couples/{coupleId} — time tracking writes', () => {
+  it('allows recording pairedAt when creating a pairing', async () => {
+    await assertSucceeds(
+      setDoc(doc(testEnv.authenticatedContext(UID_A).firestore(), 'couples', COUPLE_ID), {
+        status: 'apart',
+        participantUIDs: [UID_A],
+        partnerProfiles: {},
+        lastUpdatedBy: UID_A,
+        lastUpdatedAt: new Date(),
+        pairedAt: new Date(),
+      })
+    );
+  });
+
+  it('lets a partner say they met early: status, event, and the visit moved to now in one batch', async () => {
+    await seedCouple([UID_A, UID_B]);
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'couples', COUPLE_ID, 'visits', 'v1'), {
+        start: new Date(Date.now() + 86400000),
+        createdBy: UID_A,
+      });
+    });
+    const db = testEnv.authenticatedContext(UID_B).firestore();
+    const now = new Date();
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'couples', COUPLE_ID), { status: 'together', nextMeetupDate: now, lastUpdatedBy: UID_B });
+    batch.update(doc(db, 'couples', COUPLE_ID, 'visits', 'v1'), { start: now });
+    batch.set(doc(db, 'couples', COUPLE_ID, 'events', 'e1'), { type: 'became_together', timestamp: now, triggeredBy: UID_B });
+    await assertSucceeds(batch.commit());
+  });
+});
+
 describe('couples/{coupleId}/pings — "thinking of you"', () => {
   const since = new Date(Date.now() - 5 * 86400000);
   const recentPings = (uid) =>

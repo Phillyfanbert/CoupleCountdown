@@ -42,7 +42,8 @@ public enum FirestoreREST {
             participantUIDs: participantUIDs,
             partnerProfiles: partnerProfiles(fields["partnerProfiles"]),
             lastUpdatedBy: lastUpdatedBy,
-            lastUpdatedAt: lastUpdatedAt
+            lastUpdatedAt: lastUpdatedAt,
+            pairedAt: date(fields["pairedAt"])
         )
     }
 

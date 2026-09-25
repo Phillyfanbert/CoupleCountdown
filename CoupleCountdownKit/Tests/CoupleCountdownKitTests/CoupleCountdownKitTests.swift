@@ -186,6 +186,87 @@ final class CumulativeStatsCalculatorTests: XCTestCase {
     }
 }
 
+final class SeparationTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    private func day(_ n: Double) -> Date { t0.addingTimeInterval(n * 86_400) }
+    private func event(_ type: RelationshipEvent.EventType, _ at: Date) -> RelationshipEvent {
+        RelationshipEvent(id: UUID().uuidString, type: type, timestamp: at, triggeredBy: "a")
+    }
+
+    func testPairingStartsTheFirstStretchApart() {
+        // Paired while apart, first met on day 44: those 44 days are apart.
+        let events = [event(.becameTogether, day(44))]
+        let stats = CumulativeStatsCalculator.calculate(events: events, pairedAt: t0, now: day(50))
+        XCTAssertEqual(stats.totalDaysApart, 44, accuracy: 1e-6)
+        XCTAssertEqual(stats.totalDaysTogether, 6, accuracy: 1e-6)
+        // Without the pairing time (older pairings) it's the old behavior.
+        XCTAssertEqual(CumulativeStatsCalculator.calculate(events: events, now: day(50)).totalDaysApart, 0)
+    }
+
+    func testFreshPairingIsApartSoFar() {
+        let stats = CumulativeStatsCalculator.calculate(events: [], pairedAt: t0, now: day(3))
+        XCTAssertEqual(stats.totalDaysApart, 3, accuracy: 1e-6)
+        XCTAssertEqual(CumulativeStatsCalculator.separations(events: [], pairedAt: t0), [Separation(start: t0, end: nil)])
+    }
+
+    func testSeparationsRunFromPartingToReunionAndIgnoreRepeats() {
+        let events = [
+            event(.becameTogether, day(44)),
+            event(.becameTogether, day(44.001)), // both tapped
+            event(.becameApart, day(50)),
+            event(.becameApart, day(50.001)),
+            event(.becameTogether, day(80)),
+            event(.becameApart, day(85)),
+        ]
+        let separations = CumulativeStatsCalculator.separations(events: events, pairedAt: t0)
+        XCTAssertEqual(separations, [
+            Separation(start: t0, end: day(44)),
+            Separation(start: day(50), end: day(80)),
+            Separation(start: day(85), end: nil),
+        ])
+        XCTAssertEqual(separations[1].duration(), 30 * 86_400, accuracy: 1e-6)
+        XCTAssertEqual(separations[2].duration(now: day(90)), 5 * 86_400, accuracy: 1e-6)
+    }
+
+    func testDurationLabelsStatDaysAndReunionMessages() {
+        XCTAssertEqual(CountdownFormatter.durationLabel(20), "less than a minute")
+        XCTAssertEqual(CountdownFormatter.durationLabel(60), "1 minute")
+        XCTAssertEqual(CountdownFormatter.durationLabel(5 * 3_600), "5 hours")
+        XCTAssertEqual(CountdownFormatter.durationLabel(86_400 + 5 * 3_600), "1 day, 5 hours")
+        XCTAssertEqual(CountdownFormatter.durationLabel(2 * 86_400), "2 days")
+        XCTAssertEqual(CountdownFormatter.durationLabel(44.5 * 86_400), "44 days")
+        XCTAssertEqual(CountdownFormatter.statDays(0.83), "0.8")
+        XCTAssertEqual(CountdownFormatter.statDays(23.6), "24")
+        XCTAssertEqual(CountdownFormatter.reunionMessage(apartFor: 44 * 86_400), "Congratulations! You're together again after 44 days apart 💞")
+        XCTAssertEqual(CountdownFormatter.reunionMessage(apartFor: 30), "Congratulations! You're together again 💞")
+        XCTAssertEqual(CountdownFormatter.reunionMessage(partnerName: "Sam", apartFor: 2 * 86_400), "Sam says you're together after 2 days apart! Congratulations 💞")
+        XCTAssertEqual(CountdownFormatter.reunionMessage(partnerName: "Sam", apartFor: nil), "Sam says you're together! Congratulations 💞")
+    }
+}
+
+final class VisitTimingTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testMeetingEarlyFindsTheVisitThatWasCountedDownTo() {
+        let planned = Visit(id: "v", start: now.addingTimeInterval(86_400), note: nil, createdBy: "a")
+        let later = Visit(id: "w", start: now.addingTimeInterval(30 * 86_400), note: nil, createdBy: "a")
+        XCTAssertEqual(MeetupPlanner.visitMetEarly(current: planned.start, visits: [later, planned], now: now)?.id, "v")
+        // On time or late: nothing to move.
+        XCTAssertNil(MeetupPlanner.visitMetEarly(current: now.addingTimeInterval(-60), visits: [planned], now: now))
+        XCTAssertNil(MeetupPlanner.visitMetEarly(current: nil, visits: [planned], now: now))
+    }
+
+    func testSameWallTimeInAnotherZone() {
+        // 6:30 PM on Oct 1 in Chicago (CDT, UTC-5) = 23:30Z; the same wall
+        // time in Tokyo (UTC+9) = 09:30Z.
+        let chicago = TimeZone(identifier: "America/Chicago")!
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        let inChicago = Date(timeIntervalSince1970: 1_790_897_400) // 2026-10-01T23:30:00Z
+        let inTokyo = MeetupPlanner.sameWallTime(inChicago, from: chicago, to: tokyo)
+        XCTAssertEqual(inTokyo.timeIntervalSince1970, 1_790_847_000) // 2026-10-01T09:30:00Z
+    }
+}
+
 final class MilestoneCheckerTests: XCTestCase {
     func testCountdownReachedZeroWhenDatePassedAndApart() {
         let past = Date().addingTimeInterval(-60)

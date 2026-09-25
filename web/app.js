@@ -23,17 +23,24 @@ import {
   countdownParts,
   daysUntil,
   defaultVisitStart,
+  durationLabel,
+  formatStatDays,
   localISODate,
   localTimeLabel,
   monthCells,
   nextOccurrence,
   nextUpcoming,
+  normalizedStart,
   parseLocalISODate,
   pingHeadline,
   relativeDayLabel,
   resolvedNextMeetup,
+  reunionMessage,
+  separations,
   timeAgo,
   unseenPings,
+  visitMetEarly,
+  zonedTime,
 } from "./logic.js";
 
 const fbApp = initializeApp(firebaseConfig);
@@ -85,6 +92,10 @@ const S = {
   unsubProfile: null,
   unsubCouple: null,
   unsubPings: null,
+  // Every stretch apart ({ start, end }), from the event log and pairing time.
+  history: { separations: [], loaded: false },
+  zoneSynced: false, // this session already brought our time zone up to date
+  metUpClose: null, // closes the "have you met up?" popup, while it's open
   busy: false,
   creating: false,
   createError: null,
@@ -479,6 +490,8 @@ function enterMain() {
   S.couple = null;
   S.loadError = null;
   S.plan = { visits: [], dates: [], loaded: false, error: null };
+  S.history = { separations: [], loaded: false };
+  S.zoneSynced = false;
   renderShell();
   listen();
   listenPings();
@@ -494,18 +507,27 @@ function listen() {
         S.loadError = "We couldn't find this pairing anymore.";
       } else {
         const d = snap.data();
-        if (S.couple?.status === "apart" && d.status === "together" && d.lastUpdatedBy !== S.user?.uid) {
+        const previousStatus = S.couple?.status;
+        if (previousStatus === "apart" && d.status === "together" && d.lastUpdatedBy !== S.user?.uid) {
           const name = d.partnerProfiles?.[d.lastUpdatedBy]?.displayName || "Your partner";
-          celebrate(`${name} says you're together! Congratulations 💞`);
+          celebrate(reunionMessage(name, ongoingApartMs()));
         }
         S.couple = {
           status: d.status,
           nextMeetupDate: d.nextMeetupDate?.toDate?.() ?? null,
           participantUIDs: d.participantUIDs || [],
           partnerProfiles: d.partnerProfiles || {},
+          pairedAt: d.pairedAt?.toDate?.() ?? null,
         };
         S.loadError = null;
         ensureOwnProfile();
+        if (!S.zoneSynced) {
+          S.zoneSynced = true;
+          syncOwnTimeZone();
+        }
+        if (previousStatus !== d.status) loadHistory();
+        // The partner answered "have you met up?" first: close the question here.
+        if (countdownState(S.couple) !== "arrived") closeMetUpQuestion();
       }
       if (S.tab === "home" || S.tab === "settings") renderTab();
     },
@@ -547,6 +569,50 @@ async function dismissPings() {
     throw e;
   }
 }
+
+/** The stretches apart, re-read whenever the status changes. */
+async function loadHistory() {
+  try {
+    const events = await S.api.fetchEvents(S.coupleId);
+    S.history = { separations: separations(events, S.couple?.pairedAt), loaded: true };
+  } catch (e) {
+    console.error("loadHistory failed", e);
+    return;
+  }
+  if (S.screen === "main" && S.tab === "home") renderTab();
+}
+
+/** The stretch apart still going on, if any. */
+function ongoingSeparation() {
+  const last = S.history.separations.at(-1);
+  return last && !last.end ? last : null;
+}
+
+function ongoingApartMs() {
+  const sep = ongoingSeparation();
+  return sep ? Date.now() - sep.start : null;
+}
+
+/** The other partner's profile (name and time zone), once they've joined. */
+function partnerProfile() {
+  return Object.entries(S.couple?.partnerProfiles || {}).find(([uid]) => uid !== S.user?.uid)?.[1] ?? null;
+}
+
+/**
+ * Keeps this person's time zone on the couple doc current, so the partner's
+ * clock for them is right after they travel or move — it used to be written
+ * once, at pairing. Runs when the pairing opens and when the tab comes back
+ * into view; not on every update, so two of this person's devices in
+ * different zones can't keep overwriting each other.
+ */
+function syncOwnTimeZone() {
+  const mine = S.couple?.partnerProfiles[S.user?.uid];
+  if (!mine || mine.timeZoneIdentifier === timeZone()) return;
+  S.api.ensurePartnerProfile(S.coupleId, mine.displayName, timeZone()).catch((e) => console.error("syncOwnTimeZone failed", e));
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && S.screen === "main") syncOwnTimeZone();
+});
 
 /** A join whose second write failed leaves this person nameless on the couple doc. */
 function ensureOwnProfile() {
@@ -607,12 +673,16 @@ function homeView() {
   main.push(h("div", { class: "row spread", style: "margin-bottom:16px" },
     h("span", { class: "badge", id: "statusBadge" }, together ? "❤️ Together right now" : "🤍 Apart, for now")));
 
-  const clocks = Object.values(c.partnerProfiles).map((p) => localTimeLabel(p.displayName, p.timeZoneIdentifier));
-  if (clocks.length) main.push(h("p", { class: "muted small", id: "clocks" }, clocks.join("  ·  ")));
+  // Kept current by tick() — it used to be drawn once and then sat frozen.
+  if (Object.keys(c.partnerProfiles).length) main.push(h("p", { class: "muted small", id: "clocks" }, clockLabels(c)));
 
   const error = h("p", { class: "error", id: "homeError", hidden: true });
-  const toggle = h("button", { class: "btn primary", id: "toggleStatusButton", onclick: () => onToggle(toggle, error) },
-    together ? "✈️ Leaving again" : "❤️ We're together now");
+  const toggle = h("button", {
+    class: "btn primary",
+    id: "toggleStatusButton",
+    disabled: S.busy,
+    onclick: () => (S.couple?.status === "together" ? leaveAgain() : confirmTogether()),
+  }, together ? "✈️ Leaving again" : "❤️ We're together now");
   const ping = h("button", { class: "btn", id: "thinkingOfYouButton", onclick: () => onPing(ping, error) }, "💌 Send a little “thinking of you”");
   main.push(h("div", { class: "stack" }, toggle, ping, error));
 
@@ -649,6 +719,17 @@ function pingCard(c) {
     S.pings.error ? h("p", { class: "error" }, S.pings.error) : null);
 }
 
+function clockLabels(c, now = new Date()) {
+  return Object.values(c.partnerProfiles).map((p) => localTimeLabel(p.displayName, p.timeZoneIdentifier, now)).join("  ·  ");
+}
+
+/** "Apart for 23 days so far" — how long this stretch apart has lasted (kept current by tick()). */
+function apartLine(c) {
+  const sep = c.status === "apart" ? ongoingSeparation() : null;
+  if (!sep) return null;
+  return h("p", { class: "muted small", id: "apartForText", style: "margin-top:12px" }, `Apart for ${durationLabel(Date.now() - sep.start)} so far`);
+}
+
 function todayLabel(now = new Date()) {
   return `Today is ${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`;
 }
@@ -662,7 +743,7 @@ function countdownState(c, now = new Date()) {
 
 function countdownCard(c) {
   const state = countdownState(c);
-  const card = (...kids) => h("div", { class: "card countdown", "data-state": state }, ...kids);
+  const card = (...kids) => h("div", { class: "card countdown", "data-state": state }, ...kids, apartLine(c));
   if (state === "together") {
     // Previously the iPhone kept ticking "until we're together again" here.
     return card(h("div", { class: "empty-big" }, "💞"), h("h2", { id: "togetherText" }, "You're together"), h("p", { class: "muted" }, "Enjoy every minute."));
@@ -681,7 +762,7 @@ function countdownCard(c) {
       h("p", { id: "metUpQuestionText" }, "Have you two met up?"),
       notYet ? h("p", { class: "muted small" }, "No rush. Tap Yes when you're together, or change the time if plans moved.") : null,
       h("div", { class: "stack", style: "margin-top:12px" },
-        h("button", { class: "btn primary", id: "metUpYesButton", onclick: confirmMetUp }, "💞 Yes, we're together!"),
+        h("button", { class: "btn primary", id: "metUpYesButton", disabled: S.busy, onclick: confirmTogether }, "💞 Yes, we're together!"),
         notYet
           ? h("button", { class: "btn", id: "rescheduleButton", onclick: () => openVisitModal("change") }, "Change the time")
           : h("button", { class: "btn", id: "metUpNotYetButton", onclick: () => { rememberMetUp("notYet", key); renderTab(); } }, "Not yet")));
@@ -698,10 +779,10 @@ function planButton(label, purpose) {
   return h("button", { class: "btn", id: "planVisitButton", style: "margin-top:12px", onclick: () => openVisitModal(purpose) }, label);
 }
 
-/** "Thu, Oct 1 at 6:30 PM" in the viewer's own time. */
-function formatWhen(date) {
-  const day = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+/** "Thu, Oct 1 at 6:30 PM" — in the viewer's own time, or in `timeZone`. */
+function formatWhen(date, timeZone = undefined) {
+  const day = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone });
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone });
   return `${day} at ${time}`;
 }
 
@@ -711,6 +792,11 @@ function tick() {
   if (today) today.textContent = todayLabel();
   const c = S.couple;
   if (!c || S.tab !== "home") return;
+  const clocks = document.getElementById("clocks");
+  if (clocks) clocks.textContent = clockLabels(c);
+  const apart = document.getElementById("apartForText");
+  const sep = ongoingSeparation();
+  if (apart && sep) apart.textContent = `Apart for ${durationLabel(Date.now() - sep.start)} so far`;
   const card = document.querySelector(".card.countdown");
   if (card && card.dataset.state !== countdownState(c)) {
     renderTab();
@@ -728,30 +814,80 @@ function tick() {
 }
 setInterval(tick, 1000);
 
-async function onToggle(button, error) {
-  const c = S.couple;
-  if (!c || S.busy) return;
-  S.busy = true;
-  button.disabled = true;
-  error.hidden = true;
-  try {
-    if (c.status === "apart") {
-      await S.api.setStatus(S.coupleId, "together");
-      celebrate("Congratulations! You're together again 💞");
-    } else {
-      // Every goodbye is a new trip: count down to the next *planned* visit,
-      // or ask for one if nothing is planned.
-      const next = nextUpcoming(await S.api.fetchVisits(S.coupleId));
-      if (next) await S.api.setStatus(S.coupleId, "apart", next.start);
-      else openVisitModal("leaving");
+/**
+ * "We're together now" / "Yes, we're together!". Only ever goes *to*
+ * together, from the latest state. Meeting before the planned time moves that
+ * visit to now, so "Leaving again" can't count down to it a second time.
+ */
+async function confirmTogether() {
+  if (S.couple?.status !== "apart") return;
+  await changeStatus(async () => {
+    const c = S.couple;
+    if (c?.status !== "apart") return;
+    const apartFor = ongoingApartMs();
+    const now = normalizedStart(new Date());
+    let metEarly = null;
+    if (c.nextMeetupDate && c.nextMeetupDate > now) {
+      try {
+        metEarly = visitMetEarly(c.nextMeetupDate, await S.api.fetchVisits(S.coupleId), now);
+      } catch (e) {
+        console.error("fetchVisits failed; not moving the visit", e);
+      }
     }
+    watchSave(S.api.setStatus(S.coupleId, "together", metEarly ? now : null, metEarly ? { id: metEarly.id, start: now } : null));
+    closeMetUpQuestion();
+    // Only now, once someone has said they've met.
+    celebrate(reunionMessage(null, apartFor));
+  });
+}
+
+/** Every goodbye is a new trip: count down to the next *planned* visit, or ask for one if nothing is planned. */
+async function leaveAgain() {
+  await changeStatus(async () => {
+    const next = nextUpcoming(await S.api.fetchVisits(S.coupleId));
+    if (next) watchSave(S.api.setStatus(S.coupleId, "apart", next.start));
+    else openVisitModal("leaving");
+  });
+}
+
+/**
+ * One status change at a time; the buttons stay off for a second after, so
+ * a double tap can't land on the button that just swapped its label.
+ */
+async function changeStatus(change) {
+  if (S.busy) return;
+  S.busy = true;
+  setStatusButtonsDisabled(true);
+  showHomeError(null);
+  try {
+    await change();
   } catch (e) {
-    console.error("toggle failed", e);
-    error.textContent = "Couldn't update — check your connection and try again.";
-    error.hidden = false;
+    console.error("status change failed", e);
+    showHomeError("Couldn't update — check your connection and try again.");
   }
-  S.busy = false;
-  button.disabled = false;
+  setTimeout(() => {
+    S.busy = false;
+    setStatusButtonsDisabled(false);
+  }, 1000);
+}
+
+/** The write goes out without waiting (offline, it's sent later); a rejection is still reported. */
+function watchSave(saving) {
+  saving.catch((e) => {
+    console.error("status write failed", e);
+    showHomeError("Couldn't save that change — check your connection and try again.");
+  });
+}
+
+function showHomeError(text) {
+  const el = document.getElementById("homeError");
+  if (!el) return;
+  el.textContent = text || "";
+  el.hidden = !text;
+}
+
+function setStatusButtonsDisabled(disabled) {
+  document.querySelectorAll("#toggleStatusButton, #metUpYesButton, #metUpModalYesButton").forEach((b) => { b.disabled = disabled; });
 }
 
 // ---------- "have you met up?" and the celebration ----------
@@ -769,30 +905,15 @@ function askIfMetUp() {
   const key = meetupKey(c);
   if (S.metUp.asked === key || document.querySelector(".modal-backdrop")) return;
   rememberMetUp("asked", key);
-  const close = openModal("The countdown's done! ⏰", "Have you met up?",
+  S.metUpClose = openModal("The countdown's done! ⏰", "Have you met up?",
     h("p", {}, "Have you two met up?"),
-    h("button", { class: "btn primary", id: "metUpModalYesButton", onclick: () => { close(); confirmMetUp(); } }, "💞 Yes, we're together!"),
-    h("button", { class: "btn", id: "metUpModalNotYetButton", onclick: () => { close(); rememberMetUp("notYet", key); renderTab(); } }, "Not yet"));
+    h("button", { class: "btn primary", id: "metUpModalYesButton", onclick: () => { closeMetUpQuestion(); confirmTogether(); } }, "💞 Yes, we're together!"),
+    h("button", { class: "btn", id: "metUpModalNotYetButton", onclick: () => { closeMetUpQuestion(); rememberMetUp("notYet", key); renderTab(); } }, "Not yet"));
 }
 
-/** "Yes, we're together!" — only now does it celebrate. */
-async function confirmMetUp() {
-  if (S.busy || S.couple?.status !== "apart") return;
-  S.busy = true;
-  document.querySelectorAll("#metUpYesButton").forEach((b) => { b.disabled = true; });
-  try {
-    await S.api.setStatus(S.coupleId, "together");
-    celebrate("Congratulations! You're together again 💞");
-  } catch (e) {
-    console.error("confirmMetUp failed", e);
-    const error = document.getElementById("homeError");
-    if (error) {
-      error.textContent = "Couldn't update — check your connection and try again.";
-      error.hidden = false;
-    }
-    document.querySelectorAll("#metUpYesButton").forEach((b) => { b.disabled = false; });
-  }
-  S.busy = false;
+function closeMetUpQuestion() {
+  S.metUpClose?.();
+  S.metUpClose = null;
 }
 
 /** Congratulations with falling hearts; tap it or wait a few seconds to close. */
@@ -850,12 +971,38 @@ function openVisitModal(purpose, initial = null) {
   const date = h("input", { type: "date", id: "visitDateInput", value: localISODate(start), min: localISODate(new Date()) });
   const time = h("input", { type: "time", id: "visitTimeInput", value: `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}` });
   const note = h("input", { type: "text", id: "visitNoteInput", placeholder: "Note (optional) — e.g. Sam lands at LAX", maxlength: "80" });
+  // With the partner in another time zone, the time can be entered as theirs.
+  // It used to be read silently in this browser's zone, so a traveler
+  // entering the landing time at the other end ended the countdown hours off.
+  const partner = partnerProfile();
+  const partnerZone = partner && partner.timeZoneIdentifier !== timeZone() ? partner.timeZoneIdentifier : null;
+  const zone = partnerZone
+    ? h("select", { id: "visitZoneInput", onchange: () => updateSummary() },
+      h("option", { value: "mine" }, "My time"),
+      h("option", { value: "partner" }, `${partner.displayName}'s time`))
+    : null;
+  const summary = partnerZone ? h("p", { class: "muted small", id: "visitZoneSummary" }) : null;
+  const pickedTime = () => {
+    if (!date.value || !time.value) return null;
+    const [y, mo, d] = date.value.split("-").map(Number);
+    const [hh, mm] = time.value.split(":").map(Number);
+    if (zone?.value === "partner") return zonedTime(y, mo, d, hh, mm, partnerZone);
+    const local = parseLocalISODate(date.value);
+    local.setHours(hh, mm, 0, 0);
+    return local;
+  };
+  // The same moment for both of them, so a mix-up shows before saving.
+  const updateSummary = () => {
+    if (!summary) return;
+    const at = pickedTime();
+    summary.textContent = at ? `For you: ${formatWhen(at)} · For ${partner.displayName}: ${formatWhen(at, partnerZone)}` : "";
+  };
+  date.addEventListener("input", updateSummary);
+  time.addEventListener("input", updateSummary);
   const error = h("p", { class: "error", hidden: true });
   const save = h("button", { class: "btn primary", id: "saveDateButton", onclick: async () => {
-    if (!date.value || !time.value) return;
-    const picked = parseLocalISODate(date.value);
-    const [hh, mm] = time.value.split(":").map(Number);
-    picked.setHours(hh, mm, 0, 0);
+    const picked = pickedTime();
+    if (!picked) return;
     if (picked <= new Date()) {
       error.textContent = "Pick a time in the future.";
       error.hidden = false;
@@ -876,9 +1023,12 @@ function openVisitModal(purpose, initial = null) {
   const title = purpose === "change" ? "Change the date ✈️" : purpose === "calendar" ? "Plan a visit ✈️" : "When do you see each other next? ✈️";
   const close = openModal(title, "Plan a visit",
     h("div", { class: "row" }, h("label", { class: "field grow" }, "Date", date), h("label", { class: "field grow" }, "Time", time)),
+    zone ? h("label", { class: "field" }, "Whose time?", zone) : null,
+    summary,
     h("label", { class: "field" }, "Note", note),
     error, save,
     h("button", { class: "btn link", onclick: () => close() }, "Cancel"));
+  updateSummary();
   date.focus();
 }
 
@@ -1071,12 +1221,22 @@ function statsView() {
   const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "Loading…"));
   (async () => {
     try {
-      const stats = computeStats(await S.api.fetchEvents(S.coupleId));
-      const fmt = (n) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
+      const events = await S.api.fetchEvents(S.coupleId);
+      const pairedAt = S.couple?.pairedAt ?? null;
+      const stats = computeStats(events, new Date(), pairedAt);
+      const stretches = separations(events, pairedAt);
+      const finished = stretches.filter((sep) => sep.end);
+      const current = stretches.at(-1)?.end === null ? stretches.at(-1) : null;
+      const row = (id, label, value) => h("div", { class: "stat", id }, h("span", {}, label), h("b", {}, value));
       if (!body.isConnected) return;
       body.replaceChildren(
-        h("div", { class: "stat", id: "daysTogetherStat" }, h("span", {}, "❤️ Days together"), h("b", {}, fmt(stats.totalDaysTogether))),
-        h("div", { class: "stat", id: "daysApartStat" }, h("span", {}, "✈️ Days apart"), h("b", {}, fmt(stats.totalDaysApart))));
+        row("daysTogetherStat", "❤️ Days together", formatStatDays(stats.totalDaysTogether)),
+        row("daysApartStat", "✈️ Days apart", formatStatDays(stats.totalDaysApart)),
+        // How long each stretch apart lasted — the totals alone never said.
+        current ? row("currentSeparationStat", "⏳ Apart right now", `${durationLabel(Date.now() - current.start)} so far`) : null,
+        finished.length ? row("lastSeparationStat", "🛬 Last time apart", durationLabel(finished.at(-1).end - finished.at(-1).start)) : null,
+        finished.length > 1 ? row("longestSeparationStat", "🏆 Longest apart", durationLabel(Math.max(...finished.map((sep) => sep.end - sep.start)))) : null,
+        finished.length ? row("reunionsStat", "✨ Reunions", String(finished.length)) : null);
     } catch (e) {
       console.error("fetchEvents failed", e);
       if (body.isConnected) body.replaceChildren(h("p", { class: "error" }, "Couldn't load stats."));

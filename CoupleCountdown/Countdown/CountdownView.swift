@@ -24,6 +24,12 @@ struct CountdownView: View {
     @State private var isConfirmingCancel = false
     @State private var cancelError: String?
     @State private var leaveError: String?
+    /// True while a status change runs, and for a second after: the main
+    /// button swaps "We're together now" / "Leaving again" in place, so a
+    /// double tap used to undo the change it had just made.
+    @State private var isChangingStatus = false
+    /// Every stretch apart, from the event log (and the pairing time).
+    @State private var separations: [Separation] = []
 
     // Tracks which milestones have already been shown, so reopening the
     // app or the view reloading doesn't re-celebrate the same one every
@@ -81,14 +87,14 @@ struct CountdownView: View {
             .navigationTitle("💕 CoupleCountdown")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    NavigationLink { StatsView(coupleId: coupleId) } label: {
+                    NavigationLink { StatsView(coupleId: coupleId, pairedAt: sync.state?.pairedAt) } label: {
                         Image(systemName: "chart.bar.fill")
                     }
                     .accessibilityIdentifier("statsNavLink")
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink {
-                        CalendarScreen(coupleId: coupleId) { newState in
+                        CalendarScreen(coupleId: coupleId, partner: partnerProfile) { newState in
                             sync.applyLocalWrite(newState)
                         }
                     } label: {
@@ -128,25 +134,34 @@ struct CountdownView: View {
             sync.startListening()
             pings.startListening()
             await sync.fetchOnLaunch()
+            await syncOwnTimeZone()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 sync.startListening()
                 pings.startListening()
-                Task { await sync.fetchOnLaunch() }
+                Task {
+                    await sync.fetchOnLaunch()
+                    await syncOwnTimeZone()
+                }
             } else {
                 sync.stopListening()
                 pings.stopListening()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            Task { await syncOwnTimeZone() }
+        }
         .onChange(of: sync.state) { oldState, newState in
             guard let newState else { return }
             // Your partner said you've met: the congratulations reach you too.
             if oldState?.status == .apart, newState.status == .together, newState.lastUpdatedBy != uid {
-                let name = newState.partnerProfiles[newState.lastUpdatedBy]?.displayName ?? "Your partner"
-                celebrationMessage = "\(name) says you're together! Congratulations 💞"
+                celebrationMessage = CountdownFormatter.reunionMessage(
+                    partnerName: newState.partnerProfiles[newState.lastUpdatedBy]?.displayName ?? "Your partner",
+                    apartFor: ongoingSeparation?.duration()
+                )
             }
-            Task { await checkForMilestones(state: newState) }
+            Task { await refreshHistory(state: newState) }
             Task { await ensureOwnProfile(state: newState) }
         }
         .task(id: arrivalWatchKey) {
@@ -154,7 +169,7 @@ struct CountdownView: View {
         }
         .alert("The countdown's done! ⏰", isPresented: $isAskingMetUp) {
             Button("Yes, we're together!") {
-                if let state = sync.state { Task { await toggleStatus(state: state) } }
+                Task { await confirmTogether() }
             }
             Button("Not yet", role: .cancel) {
                 if let state = sync.state { metUpNotYetFor = meetupKey(state) }
@@ -173,7 +188,7 @@ struct CountdownView: View {
                 // Real users get the deliberately brief default (4s) —
                 // under XCUITest that same window raced against real
                 // network/automation overhead (app-idle waits, the
-                // Firestore round-trip in checkForMilestones) and the
+                // Firestore round-trip in refreshHistory) and the
                 // overlay was reliably gone before a test ever got around
                 // to checking for it. A longer delay only under the test
                 // flag fixes the race without touching real UX timing.
@@ -222,7 +237,11 @@ struct CountdownView: View {
                     countdownCard(state: state, now: context.date)
                 }
                 statusBadge(state: state)
-                partnerTimeZones(state: state)
+                // Each partner's local time, kept current (it used to be drawn
+                // once and then sat frozen).
+                TimelineView(.everyMinute) { context in
+                    partnerTimeZones(state: state, now: context.date)
+                }
 
                 Button {
                     Task { await toggleStatus(state: state) }
@@ -237,6 +256,7 @@ struct CountdownView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(theme.accentColor)
                 .controlSize(.large)
+                .disabled(isChangingStatus)
                 .accessibilityIdentifier("toggleStatusButton")
 
                 ThinkingOfYouButton(coupleId: coupleId)
@@ -406,13 +426,14 @@ struct CountdownView: View {
                 }
                 VStack(spacing: 8) {
                     Button {
-                        Task { await toggleStatus(state: state) }
+                        Task { await confirmTogether() }
                     } label: {
                         Label("Yes, we're together!", systemImage: "heart.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(theme.accentColor)
+                    .disabled(isChangingStatus)
                     .accessibilityIdentifier("metUpYesButton")
                     if saidNotYet {
                         Button("Change the time") { viewModel.visitSheetPurpose = .change }
@@ -439,6 +460,15 @@ struct CountdownView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("planVisitButton")
             }
+            // How long this stretch apart has lasted — the other half of
+            // tracking the time from parting to being together again.
+            if state.status == .apart, let since = ongoingSeparation?.start {
+                Text("Apart for \(CountdownFormatter.durationLabel(now.timeIntervalSince(since))) so far")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("apartForText")
+            }
         }
         .padding(24)
         .frame(maxWidth: .infinity)
@@ -461,13 +491,13 @@ struct CountdownView: View {
     }
 
     @ViewBuilder
-    private func partnerTimeZones(state: RelationshipState) -> some View {
+    private func partnerTimeZones(state: RelationshipState, now: Date) -> some View {
         if !state.partnerProfiles.isEmpty {
             VStack(spacing: 4) {
                 ForEach(Array(state.partnerProfiles.keys.sorted()), id: \.self) { profileUID in
                     if let profile = state.partnerProfiles[profileUID] {
                         Label(
-                            CountdownFormatter.localTimeString(label: profile.displayName, timeZoneIdentifier: profile.timeZoneIdentifier),
+                            CountdownFormatter.localTimeString(label: profile.displayName, timeZoneIdentifier: profile.timeZoneIdentifier, now: now),
                             systemImage: "clock.fill"
                         )
                         .font(.caption)
@@ -478,26 +508,59 @@ struct CountdownView: View {
         }
     }
 
-    /// Also applies the result to SyncCoordinator right away, so the acting
-    /// partner's own widget updates without waiting for the listener to echo
-    /// the write back (§5.2's sync pipeline convention).
+    /// The main button: "We're together now" or "Leaving again", depending
+    /// on the status it shows. Each result is also applied to SyncCoordinator
+    /// right away, so the acting partner's own widget updates without waiting
+    /// for the listener (§5.2's sync pipeline convention).
     private func toggleStatus(state: RelationshipState) async {
-        var updated = state
-        if state.status == .apart {
-            guard await viewModel.markTogether() else { return }
-            updated.status = .together
-            // Only now, once someone has said they've met.
-            isAskingMetUp = false
-            celebrationMessage = "Congratulations! You're together again 💞"
-        } else {
-            // nil means the visit sheet opened (nothing planned) or it failed.
+        guard state.status == .together else {
+            await confirmTogether()
+            return
+        }
+        await changeStatus {
+            // nil: the visit sheet opened (nothing planned), or it failed.
             guard let next = await viewModel.leave() else { return }
+            var updated = state
             updated.status = .apart
             updated.nextMeetupDate = next
+            updated.lastUpdatedBy = uid
+            updated.lastUpdatedAt = Date()
+            sync.applyLocalWrite(updated)
         }
-        updated.lastUpdatedBy = uid
-        updated.lastUpdatedAt = Date()
-        sync.applyLocalWrite(updated)
+    }
+
+    /// "Yes, we're together!" and "We're together now". Only ever goes *to*
+    /// together, from the latest state: the Yes buttons used to call the
+    /// toggle, so a Yes tapped just after the partner's ran "Leaving again".
+    private func confirmTogether() async {
+        await changeStatus {
+            guard let state = sync.state, state.status == .apart else { return }
+            let apartFor = ongoingSeparation?.duration()
+            sync.applyLocalWrite(await viewModel.markTogether(current: state))
+            isAskingMetUp = false
+            // Only now, once someone has said they've met.
+            celebrationMessage = CountdownFormatter.reunionMessage(apartFor: apartFor)
+        }
+    }
+
+    /// One status change at a time, and the buttons stay off for a second
+    /// afterwards so a double tap can't land on the swapped button.
+    private func changeStatus(_ change: () async -> Void) async {
+        guard !isChangingStatus else { return }
+        isChangingStatus = true
+        await change()
+        try? await Task.sleep(for: .seconds(1))
+        isChangingStatus = false
+    }
+
+    /// The stretch apart still going on, if any.
+    private var ongoingSeparation: Separation? {
+        separations.last.flatMap { $0.end == nil ? $0 : nil }
+    }
+
+    /// The other partner's profile (name and time zone), once they've joined.
+    private var partnerProfile: PartnerProfile? {
+        sync.state?.partnerProfiles.first { $0.key != uid }?.value
     }
 
     @ViewBuilder
@@ -508,6 +571,7 @@ struct CountdownView: View {
             // A meetup that has already passed (rescheduling after "not
             // yet") isn't a valid starting point: the picker only allows the future.
             initialStart: purpose == .change ? sync.state?.nextMeetupDate.flatMap { $0 > Date() ? $0 : nil } : nil,
+            partner: partnerProfile,
             errorMessage: viewModel.errorMessage,
             onSave: { start, note in
                 guard let state = sync.state,
@@ -530,7 +594,25 @@ struct CountdownView: View {
             coupleId: coupleId,
             uid: uid,
             displayName: displayName,
-            timeZoneIdentifier: TimeZone.current.identifier
+            timeZoneIdentifier: TimeZone.autoupdatingCurrent.identifier
+        )
+    }
+
+    /// Keeps this person's time zone on the couple doc current, so the
+    /// partner's clock for them is right after they travel or move — it used
+    /// to be written once, at pairing. Runs on launch, on coming back to the
+    /// app, and when the phone's time zone changes; not on every update, so
+    /// two of this person's devices in different zones can't keep
+    /// overwriting each other.
+    private func syncOwnTimeZone() async {
+        guard let mine = sync.state?.partnerProfiles[uid] else { return }
+        let zone = TimeZone.autoupdatingCurrent.identifier
+        guard mine.timeZoneIdentifier != zone else { return }
+        try? await firestore.ensurePartnerProfile(
+            coupleId: coupleId,
+            uid: uid,
+            displayName: mine.displayName,
+            timeZoneIdentifier: zone
         )
     }
 
@@ -564,25 +646,27 @@ struct CountdownView: View {
         isAskingMetUp = true
     }
 
-    // MARK: - Milestone celebration (§7.3)
+    // MARK: - History: stretches apart, milestones (§7.2, §7.3)
 
-    private func checkForMilestones(state: RelationshipState) async {
+    /// Re-reads the event log after each change, for the stretches apart
+    /// ("Apart for … so far", the reunion message) and round-number
+    /// milestones.
+    private func refreshHistory(state: RelationshipState) async {
+        guard let events = try? await firestore.fetchEvents(coupleId: coupleId) else { return }
+        separations = CumulativeStatsCalculator.separations(events: events, pairedAt: state.pairedAt)
+
         var celebrated = Set(celebratedMilestonesRaw.split(separator: ",").map(String.init))
-
-        if let events = try? await firestore.fetchEvents(coupleId: coupleId) {
-            let stats = CumulativeStatsCalculator.calculate(events: events)
-            if let milestone = MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: stats.totalDaysTogether) {
-                let key = "days-\(milestone)"
-                if !celebrated.contains(key) {
-                    celebrated.insert(key)
-                    // Don't cover a reunion's congratulations.
-                    if celebrationMessage == nil {
-                        celebrationMessage = "\(milestone) days together! 🎉"
-                    }
+        let stats = CumulativeStatsCalculator.calculate(events: events, pairedAt: state.pairedAt)
+        if let milestone = MilestoneChecker.roundDayMilestoneReached(totalDaysTogether: stats.totalDaysTogether) {
+            let key = "days-\(milestone)"
+            if !celebrated.contains(key) {
+                celebrated.insert(key)
+                // Don't cover a reunion's congratulations.
+                if celebrationMessage == nil {
+                    celebrationMessage = "\(milestone) days together! 🎉"
                 }
             }
         }
-
         celebratedMilestonesRaw = celebrated.joined(separator: ",")
     }
 }
