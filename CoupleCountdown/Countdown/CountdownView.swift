@@ -286,8 +286,8 @@ struct CountdownView: View {
                 .font(.system(.title, design: .monospaced, weight: .bold))
                 .textSelection(.enabled)
                 .accessibilityIdentifier("waitingCodeText")
-            ShareLink(item: coupleId, message: Text("Join me on CoupleCountdown with code \(coupleId)")) {
-                Label("Share code", systemImage: "square.and.arrow.up")
+            ShareLink(item: JoinLink.url(for: coupleId), message: Text("Join me on CoupleCountdown with code \(coupleId)")) {
+                Label("Share invite", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.bordered)
             Text("They create their own account, tap Join, and enter this — in the app or on the web.")

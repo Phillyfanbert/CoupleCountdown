@@ -25,9 +25,12 @@ struct ReceivedPingCard: View {
                 .multilineTextAlignment(.center)
                 .accessibilityIdentifier("receivedPingText")
             if let newest = pings.first {
-                Text(newest.sentAt, format: .relative(presentation: .named))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Redrawn each minute, so "2 hours ago" doesn't go stale.
+                TimelineView(.everyMinute) { _ in
+                    Text(newest.sentAt, format: .relative(presentation: .named))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack {
                 Button {

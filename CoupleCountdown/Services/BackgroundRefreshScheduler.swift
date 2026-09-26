@@ -2,6 +2,9 @@
 
 import Foundation
 import BackgroundTasks
+import WidgetKit
+import FirebaseAuth
+import CoupleCountdownKit
 
 /// Schedules the opportunistic background refresh from DESIGN.md §5.2 #3
 /// and logs every actual firing so real-world frequency can be measured
@@ -44,6 +47,19 @@ final class BackgroundRefreshScheduler {
         task.expirationHandler = {
             work.cancel()
         }
+    }
+
+    /// What a background refresh does: the latest state of this device's
+    /// pairing into the widget's cache, then a widget reload — a launch fetch
+    /// without the app on screen.
+    static func refreshWidgetData() async {
+        guard Auth.auth().currentUser != nil,
+              let coupleId = UserDefaults(suiteName: SharedIdentifiers.appGroup)?.string(forKey: "coupleId"),
+              !coupleId.isEmpty,
+              let state = try? await FirestoreService().fetchCouple(coupleId: coupleId)
+        else { return }
+        AppGroupCache(suiteName: SharedIdentifiers.appGroup).write(state)
+        WidgetCenter.shared.reloadTimelines(ofKind: "CountdownWidget")
     }
 
     private func logFiring() {

@@ -794,6 +794,8 @@ function tick() {
   if (!c || S.tab !== "home") return;
   const clocks = document.getElementById("clocks");
   if (clocks) clocks.textContent = clockLabels(c);
+  const pingTime = document.getElementById("receivedPingTime");
+  if (pingTime && S.pings.unseen[0]) pingTime.textContent = timeAgo(S.pings.unseen[0].sentAt);
   const apart = document.getElementById("apartForText");
   const sep = ongoingSeparation();
   if (apart && sep) apart.textContent = `Apart for ${durationLabel(Date.now() - sep.start)} so far`;

@@ -68,6 +68,11 @@ struct SignInView: View {
                     if mode == .createAccount {
                         TextField("Your name (what your partner sees)", text: $name)
                             .textContentType(.givenName)
+                            .onChange(of: name) { _, newName in
+                                if newName.count > PartnerProfile.maxNameLength {
+                                    name = String(newName.prefix(PartnerProfile.maxNameLength))
+                                }
+                            }
                             .focused($focusedField, equals: .name)
                             .submitLabel(.next)
                             .onSubmit { focusedField = .email }

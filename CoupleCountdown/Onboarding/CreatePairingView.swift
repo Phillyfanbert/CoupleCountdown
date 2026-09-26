@@ -39,7 +39,7 @@ struct CreatePairingView: View {
                         .background(CoupleTheme.blush.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .accessibilityIdentifier("generatedCodeText")
 
-                    if let qrImage = Self.qrCode(for: "couplecountdown://join/\(generatedCode)") {
+                    if let qrImage = Self.qrCode(for: JoinLink.url(for: generatedCode).absoluteString) {
                         Image(uiImage: qrImage)
                             .interpolation(.none)
                             .resizable()
@@ -49,16 +49,15 @@ struct CreatePairingView: View {
                             .shadow(color: CoupleTheme.blush.accentColor.opacity(0.2), radius: 8, y: 4)
                     }
 
-                    ShareLink(item: generatedCode) {
-                        Label("Share code", systemImage: "square.and.arrow.up")
+                    ShareLink(item: JoinLink.url(for: generatedCode), message: Text("Join me on CoupleCountdown with code \(generatedCode)")) {
+                        Label("Share invite", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(CoupleTheme.blush.accentColor)
 
-                    // Manually reading/typing the code is the primary,
-                    // required path — QR/deep link is best-effort convenience
-                    // only (DESIGN.md §5.3).
-                    Text("Typing the code is the reliable way to pair — the QR code and share link are best-effort convenience.")
+                    // The QR code and invite link open the web app with the
+                    // code filled in; typing the code works everywhere too.
+                    Text("Your partner can scan this or open the invite to join on the web, or type the code in the app.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

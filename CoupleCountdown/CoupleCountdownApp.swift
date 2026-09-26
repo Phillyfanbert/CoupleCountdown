@@ -8,6 +8,19 @@ import CoupleCountdownKit
 @main
 struct CoupleCountdownApp: App {
     @StateObject private var authService: AuthService
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// §5.2 mechanism #3, opportunistic background refresh. It was written
+    /// but never registered or scheduled, so it never ran: with the app
+    /// closed, only the widget's own fetch kept anything fresh.
+    /// Registered here, in a lazily created static, so it happens exactly once
+    /// even if SwiftUI builds the App value more than once — registering the
+    /// same task identifier twice crashes.
+    private static let backgroundRefresh: BackgroundRefreshScheduler = {
+        let scheduler = BackgroundRefreshScheduler(onRefresh: BackgroundRefreshScheduler.refreshWidgetData)
+        scheduler.register()
+        return scheduler
+    }()
 
     /// False only while the XCUITest reset hook (below) is still running.
     @State private var isReady: Bool
@@ -27,6 +40,8 @@ struct CoupleCountdownApp: App {
             UserDefaults(suiteName: SharedIdentifiers.appGroup)?.removePersistentDomain(forName: SharedIdentifiers.appGroup)
             KeychainStore(accessGroup: SharedIdentifiers.keychainAccessGroup).delete()
         }
+        // Must be registered before launch finishes.
+        _ = Self.backgroundRefresh
         _authService = StateObject(wrappedValue: AuthService())
         _isReady = State(initialValue: !Self.isUITestReset)
     }
@@ -48,6 +63,10 @@ struct CoupleCountdownApp: App {
                 guard !isReady else { return }
                 await resetForUITests()
                 isReady = true
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Each run schedules the next; this starts the chain.
+                if phase == .background { Self.backgroundRefresh.scheduleNext() }
             }
             .onChange(of: authService.uid) { _, uid in
                 // Signed out: the widget shouldn't keep showing this account's pairing.

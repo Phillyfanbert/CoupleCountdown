@@ -1,6 +1,7 @@
 // DisplayNameEntryView.swift — single display-name text field shown before Create/Join (DESIGN.md §5.3 point 2)
 
 import SwiftUI
+import CoupleCountdownKit
 
 struct DisplayNameEntryView: View {
     @Binding var displayName: String
@@ -19,6 +20,11 @@ struct DisplayNameEntryView: View {
 
             TextField("Your name", text: $displayName)
                 .textFieldStyle(.roundedBorder)
+                .onChange(of: displayName) { _, newName in
+                    if newName.count > PartnerProfile.maxNameLength {
+                        displayName = String(newName.prefix(PartnerProfile.maxNameLength))
+                    }
+                }
                 .font(.system(.body, design: .rounded))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)

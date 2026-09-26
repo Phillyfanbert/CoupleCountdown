@@ -244,6 +244,13 @@ final class SeparationTests: XCTestCase {
     }
 }
 
+final class JoinLinkTests: XCTestCase {
+    func testInviteLinkOpensTheWebAppWithTheCodeFilledIn() {
+        // web/app.js reads ?join= to prefill the Join screen.
+        XCTAssertEqual(JoinLink.url(for: "ABC234").absoluteString, "https://couplecountdown-7715c.web.app/?join=ABC234")
+    }
+}
+
 final class VisitTimingTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 

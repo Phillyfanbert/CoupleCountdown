@@ -364,7 +364,11 @@ couples/{coupleId}/pings/{pingId}       // "thinking of you", see §7.1
    the moment the app becomes active, before the listener attaches, so
    opening the app always shows the true current state immediately even if
    it's been closed for days.
-3. **`BGAppRefreshTask`**: the main app schedules opportunistic background
+3. **`BGAppRefreshTask`** *(as built: written early but never registered
+   or scheduled, so it never ran until a later bug hunt wired it up. It's now
+   registered at launch and scheduled when the app goes to the background.
+   Each run fetches the pairing into the widget's cache and reloads the
+   widget)*: the main app schedules opportunistic background
    wake-ups (`BGTaskScheduler`, Background Modes → Background fetch — this
    does *not* require the paid Developer Program, only Push Notifications
    and iCloud do). iOS decides if/when it actually runs based on usage
@@ -475,7 +479,12 @@ failure mode for that).
    if the app isn't installed yet. Universal Links would fix that but need
    a hosted `apple-app-site-association` file (GitHub Pages would keep it
    $0, but it's a new moving part) — deferred out of v1; typing the code is
-   what the flow is designed to always fall back to.
+   what the flow is designed to always fall back to. *(As built: the app
+   never registered that URL scheme, so the QR code opened nothing. The QR
+   code and both share buttons now carry the web invite link,
+   `https://couplecountdown-7715c.web.app/?join=CODE` (`JoinLink`), which
+   opens the web app with the code filled in. That works from the Camera
+   and for a partner who doesn't have the iPhone app.)*
 4. **Partner B ("Join")**: types the code (or uses the best-effort QR/deep
    link above). App fetches `couples/{code}`, and if
    `participantUIDs.size() < 2`, appends `uidB`.
