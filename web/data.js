@@ -13,6 +13,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   query,
@@ -23,7 +24,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { dayFromStored, normalizedStart, PING_LIFETIME_MS, storedFromLocalDay } from "./logic.js";
+import { dayFromStored, fullName, normalizedStart, PING_LIFETIME_MS, storedFromLocalDay } from "./logic.js";
 
 // Same alphabet as JoinCodeGenerator.swift, no 0/O/1/I.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -36,6 +37,11 @@ export function generateJoinCode(length = 6) {
 
 export function normalizeCode(input) {
   return input.trim().toUpperCase();
+}
+
+/** A partner's entry on the couple doc: first name, last name (if any), time zone. */
+function profileFields(displayName, lastName, timeZone) {
+  return { displayName, ...(lastName ? { lastName } : {}), timeZoneIdentifier: timeZone };
 }
 
 export function makeApi(db, uid) {
@@ -57,19 +63,19 @@ export function makeApi(db, uid) {
      * records it on the account in the same batch, so the pairing can never
      * exist without the account knowing about it.
      */
-    async createCouple(coupleId, displayName, timeZone) {
+    async createCouple(coupleId, displayName, lastName, timeZone) {
       const batch = writeBatch(db);
       batch.set(coupleRef(coupleId), {
         status: "apart",
         participantUIDs: [uid],
-        partnerProfiles: { [uid]: { displayName, timeZoneIdentifier: timeZone } },
+        partnerProfiles: { [uid]: profileFields(displayName, lastName, timeZone) },
         lastUpdatedBy: uid,
         lastUpdatedAt: Timestamp.now(),
         // Pairings start apart: the first stretch apart runs from here (no
         // event marks it), so the stats count it.
         pairedAt: Timestamp.now(),
       });
-      batch.set(userRef(), { displayName, coupleId }, { merge: true });
+      batch.set(userRef(), { displayName, ...(lastName ? { lastName } : {}), coupleId }, { merge: true });
       await batch.commit();
       // No expiry: a code stays joinable until the partner joins or the
       // pairing is cancelled (both enforced by the rules).
@@ -86,20 +92,63 @@ export function makeApi(db, uid) {
      * for good. Now a failed second write only leaves the name missing, which
      * ensurePartnerProfile fills in the next time the countdown loads.
      */
-    async joinCouple(coupleId, displayName, timeZone) {
+    /**
+     * Whose pairing a code belongs to, for the "Pair with Alex Smith?"
+     * confirmation before joining. Resolves { partnerName } or rejects with
+     * an Error whose `problem` is "notFound" (no such code, or already two
+     * people: the rules can't tell those apart to an outsider), "cancelled",
+     * or "ownCode".
+     */
+    async joinPreview(coupleId) {
+      const fail = (problem) => Object.assign(new Error(problem), { problem });
+      let snap;
+      try {
+        snap = await getDoc(coupleRef(coupleId));
+      } catch (e) {
+        if (e.code === "permission-denied") throw fail("notFound");
+        throw e;
+      }
+      if (!snap.exists()) throw fail("notFound");
+      const d = snap.data();
+      if (d.closed === true) throw fail("cancelled");
+      const participants = d.participantUIDs || [];
+      if (participants.includes(uid)) throw fail("ownCode");
+      if (participants.length >= 2) throw fail("notFound");
+      const owner = d.partnerProfiles?.[participants[0]];
+      return { coupleId, partnerName: owner ? fullName(owner.displayName, owner.lastName) : "your partner" };
+    },
+
+    /**
+     * Joins an existing couple. Two writes, because the rules' join path only
+     * permits a couple-doc write that touches exactly participantUIDs.
+     *
+     * The account record goes in the *first* batch, with the join itself (a
+     * different document, so the join rule still holds). It used to be in the
+     * second: if that failed, the joiner was in the pairing but their account
+     * never knew, and retrying Join was refused (already a participant), so
+     * they were stuck for good. Now a failed second write only leaves the name
+     * missing, which ensurePartnerProfile fills in the next time the countdown
+     * loads.
+     *
+     * `discarding` is this person's own unused code (both of them tapped
+     * Create): it's closed in the same batch, so joining the partner's
+     * discards it and it can never be joined afterwards.
+     */
+    async joinCouple(coupleId, displayName, lastName, timeZone, discarding = null) {
       const join = writeBatch(db);
       join.update(coupleRef(coupleId), { participantUIDs: arrayUnion(uid) });
-      join.set(userRef(), { displayName, coupleId }, { merge: true });
+      join.set(userRef(), { displayName, ...(lastName ? { lastName } : {}), coupleId }, { merge: true });
+      if (discarding && discarding !== coupleId) join.update(coupleRef(discarding), { closed: true });
       await join.commit();
       await updateDoc(coupleRef(coupleId), {
-        [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
+        [`partnerProfiles.${uid}`]: profileFields(displayName, lastName, timeZone),
       });
     },
 
     /** Fills in this person's name/time zone on the couple doc if it's missing. */
-    async ensurePartnerProfile(coupleId, displayName, timeZone) {
+    async ensurePartnerProfile(coupleId, displayName, lastName, timeZone) {
       await updateDoc(coupleRef(coupleId), {
-        [`partnerProfiles.${uid}`]: { displayName, timeZoneIdentifier: timeZone },
+        [`partnerProfiles.${uid}`]: profileFields(displayName, lastName, timeZone),
       });
     },
 

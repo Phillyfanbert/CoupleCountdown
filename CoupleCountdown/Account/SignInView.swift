@@ -3,16 +3,17 @@
 import SwiftUI
 import CoupleCountdownKit
 
-/// One account works on every device: the iPhone app and the web client:
+/// One account works on every device (the iPhone app and the web client),
 /// and they all show the same pairing.
 struct SignInView: View {
     @EnvironmentObject private var authService: AuthService
 
     private enum Mode { case createAccount, signIn }
-    private enum Field { case name, email, password }
+    private enum Field { case name, lastName, email, password }
 
     @State private var mode: Mode = .createAccount
     @State private var name = ""
+    @State private var lastName = ""
     @State private var email = ""
     @State private var password = ""
     @State private var errorMessage: String?
@@ -44,7 +45,8 @@ struct SignInView: View {
 
     private var canSubmit: Bool {
         !isWorking && !email.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty &&
-            (mode == .signIn || !name.trimmingCharacters(in: .whitespaces).isEmpty)
+            (mode == .signIn || (!name.trimmingCharacters(in: .whitespaces).isEmpty &&
+                !lastName.trimmingCharacters(in: .whitespaces).isEmpty))
     }
 
     var body: some View {
@@ -66,7 +68,7 @@ struct SignInView: View {
 
                 VStack(spacing: 12) {
                     if mode == .createAccount {
-                        TextField("Your name (what your partner sees)", text: $name)
+                        TextField("First name", text: $name)
                             .textContentType(.givenName)
                             .onChange(of: name) { _, newName in
                                 if newName.count > PartnerProfile.maxNameLength {
@@ -75,8 +77,20 @@ struct SignInView: View {
                             }
                             .focused($focusedField, equals: .name)
                             .submitLabel(.next)
-                            .onSubmit { focusedField = .email }
+                            .onSubmit { focusedField = .lastName }
                             .accessibilityIdentifier("authNameField")
+                        // Shown to your partner when they confirm pairing with you.
+                        TextField("Last name", text: $lastName)
+                            .textContentType(.familyName)
+                            .onChange(of: lastName) { _, newName in
+                                if newName.count > PartnerProfile.maxNameLength {
+                                    lastName = String(newName.prefix(PartnerProfile.maxNameLength))
+                                }
+                            }
+                            .focused($focusedField, equals: .lastName)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .email }
+                            .accessibilityIdentifier("authLastNameField")
                     }
                     TextField("Email", text: $email)
                         .textContentType(.emailAddress)
@@ -160,6 +174,7 @@ struct SignInView: View {
     private func submit() async {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         // Put the keyboard away now, while the request runs. Left up, it was
         // still covering the lower half of the next screen (onboarding's
         // Create/Join buttons) when that screen appeared: caught by the UI
@@ -183,6 +198,7 @@ struct SignInView: View {
                     try await firestore.saveProfile(
                         uid: uid,
                         displayName: trimmedName,
+                        lastName: trimmedLastName,
                         coupleId: (legacyCoupleId?.isEmpty == false) ? legacyCoupleId : nil
                     )
                 }

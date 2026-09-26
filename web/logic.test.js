@@ -12,6 +12,7 @@ import {
   daysUntil,
   durationLabel,
   formatStatDays,
+  fullName,
   defaultVisitStart,
   localISODate,
   monthCells,
@@ -245,4 +246,10 @@ test("a time entered in another zone is that zone's wall clock, wherever this ru
   assert.equal(zonedTime(2026, 3, 8, 3, 30, "America/New_York").toISOString(), "2026-03-08T07:30:00.000Z");
   // Auckland in summer (UTC+13).
   assert.equal(zonedTime(2026, 1, 15, 9, 0, "Pacific/Auckland").toISOString(), "2026-01-14T20:00:00.000Z");
+});
+
+test("full name for the join confirmation (same cases as the Swift test)", () => {
+  assert.equal(fullName("Sam", "Lee"), "Sam Lee");
+  assert.equal(fullName("Sam", undefined), "Sam");
+  assert.equal(fullName(" Sam ", "  "), "Sam");
 });

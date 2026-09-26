@@ -9,10 +9,14 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, delete: if request.auth != null && request.auth.uid == userId;
       allow create, update: if request.auth != null && request.auth.uid == userId &&
-        request.resource.data.keys().hasOnly(['displayName', 'coupleId']) &&
+        request.resource.data.keys().hasOnly(['displayName', 'lastName', 'coupleId']) &&
         (!('displayName' in request.resource.data) ||
           (request.resource.data.displayName is string &&
            request.resource.data.displayName.size() <= 60)) &&
+        // Shown to the partner when they confirm a pairing ("Pair with Alex Smith?").
+        (!('lastName' in request.resource.data) ||
+          (request.resource.data.lastName is string &&
+           request.resource.data.lastName.size() <= 60)) &&
         (!('coupleId' in request.resource.data) ||
           request.resource.data.coupleId is string);
     }

@@ -102,10 +102,10 @@ struct AccountSessionView: View {
                 .themedBackground()
             case .ready(let profile):
                 if let coupleId = profile.coupleId, !coupleId.isEmpty, !holdingNewCode {
-                    CountdownView(coupleId: coupleId, uid: uid, displayName: profile.displayName)
+                    CountdownView(coupleId: coupleId, uid: uid, displayName: profile.displayName, lastName: profile.lastName)
                         .id(coupleId) // fresh sync state if the pairing changes
                 } else {
-                    OnboardingView(uid: uid, profileName: profile.displayName, holdingNewCode: $holdingNewCode)
+                    OnboardingView(uid: uid, profileName: profile.displayName, profileLastName: profile.lastName, holdingNewCode: $holdingNewCode)
                 }
             }
         }

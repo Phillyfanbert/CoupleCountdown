@@ -52,11 +52,15 @@ final class CoupleCountdownUITests: XCTestCase {
     /// Creates a fresh account from the sign-up screen and waits for
     /// onboarding. Returns the account's email.
     @discardableResult
-    private func signUp(_ app: XCUIApplication, name: String = "Alex") -> String {
+    private func signUp(_ app: XCUIApplication, name: String = "Alex", lastName: String = "Tester") -> String {
         let nameField = app.textFields["authNameField"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 30), "Sign-up screen never appeared")
         nameField.tap()
         nameField.typeText(name)
+
+        let lastNameField = app.textFields["authLastNameField"]
+        lastNameField.tap()
+        lastNameField.typeText(lastName)
 
         let email = makeTestEmail()
         let emailField = app.textFields["authEmailField"]
@@ -169,6 +173,15 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTAssertTrue(celebration.label.contains("Congratulations"), "Unexpected celebration: \(celebration.label)", file: file, line: line)
         celebration.tap()
         XCTAssertTrue(waitForNonExistence(of: celebration, timeout: 5), file: file, line: line)
+    }
+
+    /// Taps Join, then checks the "Pair with Alex Tester?" confirmation names
+    /// the code's owner before confirming, so nobody pairs with the wrong person.
+    private func joinAndConfirm(_ app: XCUIApplication, expecting name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let confirm = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "Pair with")).firstMatch
+        tap(app.buttons["joinButton"], until: confirm, in: app, file: file, line: line)
+        XCTAssertTrue(confirm.label.contains(name), "The confirmation should name \(name), got: \(confirm.label)", file: file, line: line)
+        confirm.buttons["Pair"].tap()
     }
 
     private func signIn(_ app: XCUIApplication, email: String, password: String) {
@@ -518,6 +531,50 @@ final class CoupleCountdownUITests: XCTestCase {
         waitForExpectations(timeout: 15) // real Firestore write for sendPing()
     }
 
+    func testWhenBothCreatedCodesJoiningTheirsDiscardsYours() {
+        // Both tapped Create. Sam joins Alex's code from the waiting card,
+        // after confirming it's Alex's, and Sam's own code is closed in the
+        // same save, so nobody can join it afterwards.
+        var app = launchFreshApp()
+        let (alexEmail, alexCode) = completeOnboardingByCreating(app, name: "Alex")
+        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
+        tapWhenReady(app.buttons["signOutButton"], in: app)
+
+        signUp(app, name: "Sam", lastName: "Lee")
+        let samCodeText = app.staticTexts["generatedCodeText"]
+        tap(app.buttons["createPairingButton"], until: samCodeText, in: app)
+        let samCode = samCodeText.label
+        tap(app.buttons["continueToCountdownButton"], until: app.buttons["joinInsteadButton"], in: app)
+
+        let codeField = app.textFields["joinCodeTextField"]
+        tap(app.buttons["joinInsteadButton"], until: codeField, in: app)
+        codeField.tap()
+        codeField.typeText(alexCode)
+        joinAndConfirm(app, expecting: "Alex Tester")
+        XCTAssertTrue(waitForNonExistence(of: app.staticTexts["waitingCodeText"], timeout: 20), "Sam should now be paired with Alex, not waiting on their own code")
+
+        // Sam's unused code was discarded: someone else trying it is told so.
+        // (Relaunching with the reset deletes Sam's test account.)
+        app = launchFreshApp()
+        signUp(app, name: "Casey", lastName: "Other")
+        let otherCodeField = app.textFields["joinCodeTextField"]
+        tap(app.buttons["joinPairingButton"], until: otherCodeField, in: app)
+        otherCodeField.tap()
+        otherCodeField.typeText(samCode)
+        let error = app.staticTexts["joinErrorText"]
+        tap(app.buttons["joinButton"], until: error, in: app)
+        XCTAssertTrue(error.label.contains("cancelled"), "Sam's own code should no longer be joinable, got: \(error.label)")
+
+        // Alex sees the pairing with Sam. (This also leaves Alex signed in,
+        // so the next reset deletes that test account too.)
+        app = launchFreshApp()
+        signIn(app, email: alexEmail, password: testPassword)
+        let samsClock = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Sam:")).firstMatch
+        XCTAssertTrue(samsClock.waitForExistence(timeout: 20), "Alex should be paired with Sam")
+        declineSavePasswordPrompt(app)
+        XCTAssertFalse(app.staticTexts["waitingCodeText"].exists)
+    }
+
     func testPartnerSeesThinkingOfYouAndCanDismissIt() {
         // Regression: pings were sent and then never shown to anyone. Two
         // real accounts: Alex creates, Sam joins and sends one, then Alex
@@ -532,7 +589,8 @@ final class CoupleCountdownUITests: XCTestCase {
         tap(app.buttons["joinPairingButton"], until: codeField, in: app)
         codeField.tap()
         codeField.typeText(code)
-        tap(app.buttons["joinButton"], until: app.buttons["toggleStatusButton"], in: app)
+        joinAndConfirm(app, expecting: "Alex Tester")
+        XCTAssertTrue(app.buttons["toggleStatusButton"].waitForExistence(timeout: 20), "Confirming should pair Sam with Alex")
 
         let pingButton = app.buttons["thinkingOfYouButton"]
         tapWhenReady(pingButton, in: app)

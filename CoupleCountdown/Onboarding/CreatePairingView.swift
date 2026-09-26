@@ -7,6 +7,7 @@ import CoupleCountdownKit
 
 struct CreatePairingView: View {
     let displayName: String
+    let lastName: String
     /// See AccountSessionView: keeps this screen (and its code) up after the
     /// account records the new pairing, until the user taps Continue.
     @Binding var holdingNewCode: Bool
@@ -119,6 +120,7 @@ struct CreatePairingView: View {
                 coupleId: code,
                 uid: uid,
                 displayName: displayName,
+                lastName: lastName,
                 timeZoneIdentifier: TimeZone.current.identifier
             )
             generatedCode = code

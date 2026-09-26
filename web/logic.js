@@ -146,6 +146,11 @@ export function defaultVisitStart(now = new Date()) {
   return d;
 }
 
+/** "Sam Lee", or just "Sam" without a last name. Mirrors PartnerProfile.fullName. */
+export function fullName(first, last) {
+  return [first, last].map((part) => (part || "").trim()).filter(Boolean).join(" ");
+}
+
 // ---------- "thinking of you" ----------
 // Mirrors ThinkingOfYouPing.swift.
 

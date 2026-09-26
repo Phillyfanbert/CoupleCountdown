@@ -4,13 +4,16 @@ import SwiftUI
 
 struct OnboardingView: View {
     let uid: String
-    /// The account's display name: set at sign-up, so the name step only
-    /// appears for an account that somehow has none.
+    /// The account's first and last name, set at sign-up. The name step
+    /// appears for an account missing either, including accounts made
+    /// before the last name was asked for.
     let profileName: String?
+    let profileLastName: String?
     @Binding var holdingNewCode: Bool
 
     @EnvironmentObject private var authService: AuthService
     @State private var nameDraft = ""
+    @State private var lastNameDraft = ""
     @State private var nameError: String?
     @State private var path: Path = .choice
 
@@ -27,22 +30,31 @@ struct OnboardingView: View {
         return profileName
     }
 
+    private var lastName: String? {
+        guard let profileLastName, !profileLastName.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return profileLastName
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if let displayName {
+                if let displayName, let lastName {
                     switch path {
                     case .choice:
                         choiceView(displayName: displayName)
                     case .create:
-                        CreatePairingView(displayName: displayName, holdingNewCode: $holdingNewCode)
+                        CreatePairingView(displayName: displayName, lastName: lastName, holdingNewCode: $holdingNewCode)
                     case .join:
-                        JoinPairingView(displayName: displayName) { path = .choice }
+                        JoinPairingView(displayName: displayName, lastName: lastName) { path = .choice }
                     }
                 } else {
                     VStack {
-                        DisplayNameEntryView(displayName: $nameDraft) {
+                        DisplayNameEntryView(firstName: $nameDraft, lastName: $lastNameDraft) {
                             Task { await saveName() }
+                        }
+                        .onAppear {
+                            if nameDraft.isEmpty { nameDraft = profileName ?? "" }
+                            if lastNameDraft.isEmpty { lastNameDraft = profileLastName ?? "" }
                         }
                         if let nameError {
                             Text(nameError).font(.caption).foregroundStyle(.red)
@@ -61,7 +73,11 @@ struct OnboardingView: View {
         do {
             // The account record's listener (AccountSessionView) picks the
             // new name up and re-renders this view past the name step.
-            try await firestore.saveProfile(uid: uid, displayName: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+            try await firestore.saveProfile(
+                uid: uid,
+                displayName: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines),
+                lastName: lastNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         } catch {
             nameError = "Couldn't save. Check your connection and try again."
         }

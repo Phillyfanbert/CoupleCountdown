@@ -30,14 +30,17 @@ final class FirestoreService {
     /// what lets the same person use the iPhone app and the web client at
     /// once and see one pairing.
     struct AccountProfile: Equatable {
+        /// First name.
         var displayName: String?
+        var lastName: String?
         var coupleId: String?
     }
 
     /// Merges the given fields into the account record (never clobbers).
-    func saveProfile(uid: String, displayName: String? = nil, coupleId: String? = nil) async throws {
+    func saveProfile(uid: String, displayName: String? = nil, lastName: String? = nil, coupleId: String? = nil) async throws {
         var fields: [String: Any] = [:]
         if let displayName { fields["displayName"] = displayName }
+        if let lastName { fields["lastName"] = lastName }
         if let coupleId { fields["coupleId"] = coupleId }
         try await userRef(uid).setData(fields, merge: true)
     }
@@ -67,6 +70,7 @@ final class FirestoreService {
             let data = snapshot.data() ?? [:]
             onChange(.success(AccountProfile(
                 displayName: data["displayName"] as? String,
+                lastName: data["lastName"] as? String,
                 coupleId: data["coupleId"] as? String
             )))
         }
@@ -77,12 +81,12 @@ final class FirestoreService {
     /// Creates a new couple doc with the caller as the sole participant, and
     /// records it on the caller's account in the same batch, so a pairing can
     /// never exist without the account knowing about it.
-    func createCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
+    func createCouple(coupleId: String, uid: String, displayName: String, lastName: String?, timeZoneIdentifier: String) async throws {
         let state = RelationshipState(
             status: .apart,
             nextMeetupDate: nil,
             participantUIDs: [uid],
-            partnerProfiles: [uid: PartnerProfile(displayName: displayName, timeZoneIdentifier: timeZoneIdentifier)],
+            partnerProfiles: [uid: PartnerProfile(displayName: displayName, lastName: lastName, timeZoneIdentifier: timeZoneIdentifier)],
             lastUpdatedBy: uid,
             lastUpdatedAt: Date(),
             // Pairings start apart; this is where the first stretch apart
@@ -91,11 +95,49 @@ final class FirestoreService {
         )
         let batch = db.batch()
         try batch.setData(from: state, forDocument: coupleRef(coupleId))
-        batch.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
+        var account: [String: Any] = ["displayName": displayName, "coupleId": coupleId]
+        if let lastName { account["lastName"] = lastName }
+        batch.setData(account, forDocument: userRef(uid), merge: true)
         try await batch.commit()
         // No expiry: a code stays joinable until the partner joins or the
         // pairing is cancelled (both enforced by the rules). It used to get
         // a 48-hour codeExpiresAt here, which nothing ever enforced.
+    }
+
+    /// Whose pairing a code belongs to, for the "Pair with Alex Smith?"
+    /// confirmation before joining, so nobody pairs with the wrong person
+    /// by a mistyped code.
+    struct JoinPreview: Equatable {
+        let coupleId: String
+        /// The code owner's first and last name.
+        let partnerName: String
+    }
+
+    enum JoinPreviewProblem: Error, Equatable {
+        /// No pairing with that code, or it already has two people (the rules
+        /// can't tell the two apart to someone outside it).
+        case notFound
+        /// Its owner cancelled it.
+        case cancelled
+        /// The code is this account's own.
+        case ownCode
+    }
+
+    func joinPreview(coupleId: String, uid: String) async throws -> JoinPreview {
+        let snapshot: DocumentSnapshot
+        do {
+            snapshot = try await coupleRef(coupleId).getDocument(source: .server)
+        } catch let error as FirestoreErrorCode where error.code == .permissionDenied {
+            throw JoinPreviewProblem.notFound
+        }
+        guard snapshot.exists, let state = try? snapshot.data(as: RelationshipState.self) else {
+            throw JoinPreviewProblem.notFound
+        }
+        if snapshot.get("closed") as? Bool == true { throw JoinPreviewProblem.cancelled }
+        if state.participantUIDs.contains(uid) { throw JoinPreviewProblem.ownCode }
+        guard state.participantUIDs.count < 2 else { throw JoinPreviewProblem.notFound }
+        let owner = state.participantUIDs.first.flatMap { state.partnerProfiles[$0] }
+        return JoinPreview(coupleId: coupleId, partnerName: owner?.fullName ?? "your partner")
     }
 
     /// Joins an existing couple doc. Two writes, because the rules' join
@@ -110,30 +152,47 @@ final class FirestoreService {
     /// for good. Now the second write only adds the name/time zone; if it
     /// fails, `ensurePartnerProfile` fills the profile in the next time the
     /// countdown loads.
-    func joinCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
+    ///
+    /// `discarding` is this person's own unused code (both of them tapped
+    /// Create): it's closed in the same batch, so joining the partner's
+    /// discards it, and it can never be joined afterwards.
+    func joinCouple(
+        coupleId: String,
+        uid: String,
+        displayName: String,
+        lastName: String?,
+        timeZoneIdentifier: String,
+        discarding ownCode: String? = nil
+    ) async throws {
         let join = db.batch()
         join.updateData(["participantUIDs": FieldValue.arrayUnion([uid])], forDocument: coupleRef(coupleId))
-        join.setData(["displayName": displayName, "coupleId": coupleId], forDocument: userRef(uid), merge: true)
+        var account: [String: Any] = ["displayName": displayName, "coupleId": coupleId]
+        if let lastName { account["lastName"] = lastName }
+        join.setData(account, forDocument: userRef(uid), merge: true)
+        if let ownCode, ownCode != coupleId {
+            join.updateData(["closed": true], forDocument: coupleRef(ownCode))
+        }
         try await join.commit()
 
         try await coupleRef(coupleId).updateData([
-            "partnerProfiles.\(uid)": [
-                "displayName": displayName,
-                "timeZoneIdentifier": timeZoneIdentifier,
-            ],
+            "partnerProfiles.\(uid)": Self.profileFields(displayName: displayName, lastName: lastName, timeZoneIdentifier: timeZoneIdentifier),
         ])
     }
 
     /// Fills in this person's name/time zone on the couple doc if it's
     /// missing (a join whose second write failed).
-    func ensurePartnerProfile(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
+    func ensurePartnerProfile(coupleId: String, uid: String, displayName: String, lastName: String?, timeZoneIdentifier: String) async throws {
         try await coupleRef(coupleId).updateData([
-            "partnerProfiles.\(uid)": [
-                "displayName": displayName,
-                "timeZoneIdentifier": timeZoneIdentifier,
-            ],
+            "partnerProfiles.\(uid)": Self.profileFields(displayName: displayName, lastName: lastName, timeZoneIdentifier: timeZoneIdentifier),
         ])
     }
+
+    private static func profileFields(displayName: String, lastName: String?, timeZoneIdentifier: String) -> [String: Any] {
+        var fields: [String: Any] = ["displayName": displayName, "timeZoneIdentifier": timeZoneIdentifier]
+        if let lastName, !lastName.isEmpty { fields["lastName"] = lastName }
+        return fields
+    }
+
 
     /// Cancels a pairing nobody has joined yet (e.g. both partners tapped
     /// Create): marks it closed so the rules refuse any further join, and

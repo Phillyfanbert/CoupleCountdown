@@ -68,13 +68,22 @@ rebuilds on every push to `main`, so they never go stale. An app signed with
 a free Apple ID has to be refreshed every 7 days, and SideStore does that on
 the phone itself.
 
-**Accounts:** sign up once with an email and password, then sign in with
-the same account on as many devices as you like: the iPhone app, your
-phone's browser, your computer. Every one shows the same countdown. Your
-partner makes their own account and joins with your code. A code doesn't
-expire: it keeps working until your partner joins with it or you cancel it.
-A pairing is always exactly two people, but each of you can use any number
-of devices.
+**Accounts and pairing:** sign up once with your first and last name, email,
+and a password, then sign in with the same account on as many devices as you
+like: the iPhone app, your phone's browser, your computer. Every one shows
+the same countdown.
+
+1. One of you taps **Create a pairing** and shares the code or invite link.
+2. The link opens the web app with the code saved. Your partner creates their
+   own account, or signs in if they already have one.
+3. Before anything is paired, they see **"Pair with Alex Smith?"** and
+   confirm, so nobody pairs with the wrong person by a mixed-up code.
+
+A code doesn't expire: it keeps working until your partner joins with it or
+you cancel it. If you both tapped Create, either of you can tap **Join theirs
+instead**: that pairs you and discards your own unused code in the same save.
+A pairing is always exactly two people, but each of you can use any number of
+devices.
 
 ## Why this project
 

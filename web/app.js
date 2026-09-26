@@ -25,6 +25,7 @@ import {
   defaultVisitStart,
   durationLabel,
   formatStatDays,
+  fullName,
   localISODate,
   localTimeLabel,
   monthCells,
@@ -72,7 +73,8 @@ const THEMES = [
 const S = {
   user: null, // signed-in account (never an anonymous user)
   api: null,
-  name: "",
+  name: "", // first name
+  lastName: "",
   coupleId: "",
   prefillCode: normalizeCode(new URLSearchParams(location.search).get("join") || ""),
   authMode: "signup", // signup | signin
@@ -217,6 +219,7 @@ function onProfile(snap) {
   if (snap.metadata.fromCache && !snap.exists()) return;
   const p = snap.data() || {};
   S.name = p.displayName || "";
+  S.lastName = p.lastName || "";
   if (p.coupleId) {
     if (p.coupleId !== S.coupleId || S.screen !== "main") {
       S.coupleId = p.coupleId;
@@ -228,7 +231,8 @@ function onProfile(snap) {
   stopCoupleListeners();
   S.couple = null;
   let step = S.step;
-  if (!S.name) step = "name";
+  // Both names: accounts made before the last name was asked for add it here.
+  if (!S.name || !S.lastName) step = "name";
   else if (step === "name" || S.screen === "main") step = S.prefillCode ? "join" : "choice";
   if (step !== S.step || S.screen !== "onboarding") {
     S.step = step;
@@ -242,7 +246,9 @@ function renderAuth() {
   const signup = S.authMode === "signup";
   const upgrading = auth.currentUser?.isAnonymous && legacy.coupleId;
 
-  const name = signup ? h("input", { type: "text", id: "authNameInput", placeholder: "Your name (what your partner sees)", autocomplete: "given-name", maxlength: "30", value: legacy.name || "" }) : null;
+  const name = signup ? h("input", { type: "text", id: "authNameInput", placeholder: "First name", autocomplete: "given-name", maxlength: "30", value: legacy.name || "" }) : null;
+  // Shown to the partner when they confirm pairing with you.
+  const lastName = signup ? h("input", { type: "text", id: "authLastNameInput", placeholder: "Last name", autocomplete: "family-name", maxlength: "30" }) : null;
   const email = h("input", { type: "email", id: "authEmailInput", placeholder: "Email", autocomplete: "email", autocapitalize: "off", spellcheck: "false" });
   const password = h("input", { type: "password", id: "authPasswordInput", placeholder: signup ? "Password (6+ characters)" : "Password", autocomplete: signup ? "new-password" : "current-password" });
   const error = h("p", { class: "error", id: "authError", hidden: true });
@@ -251,8 +257,8 @@ function renderAuth() {
   const submit = h("button", { class: "btn primary", id: "authSubmitButton", type: "submit" }, signup ? "Create account" : "Sign in");
   const form = h("form", { class: "stack", onsubmit: (e) => {
     e.preventDefault();
-    submitAuth({ name: name?.value.trim(), email: email.value.trim(), password: password.value }, error, submit);
-  } }, name, email, password, error, submit);
+    submitAuth({ name: name?.value.trim(), lastName: lastName?.value.trim(), email: email.value.trim(), password: password.value }, error, submit);
+  } }, name, lastName, email, password, error, submit);
 
   const forgot = signup ? null : h("button", { class: "btn link", type: "button", id: "forgotPasswordButton", onclick: async () => {
     error.hidden = true;
@@ -281,6 +287,11 @@ function renderAuth() {
   mount(h("div", { class: "stack" }, headerTop(),
     h("div", { class: "card stack" },
       h("h2", {}, signup ? "Create your account" : "Welcome back"),
+      // Arrived from an invite link: the code is kept for after this step.
+      S.prefillCode ? h("p", { class: "invite-note", id: "inviteNote" },
+        signup
+          ? `💌 You've been invited to pair (code ${S.prefillCode}). Create your account, or sign in if you already have one, and you'll be asked to confirm.`
+          : `💌 You've been invited to pair (code ${S.prefillCode}). Sign in and you'll be asked to confirm.`) : null,
       h("p", { class: `small ${upgrading && !signup ? "error" : "muted"}`, id: "authIntro" }, upgrading
         ? signup
           ? "Create an account to keep the pairing on this browser, then sign in with it on your phone and computer."
@@ -293,9 +304,9 @@ function renderAuth() {
   (signup ? name : email).focus();
 }
 
-async function submitAuth({ name, email, password }, error, button) {
-  if (S.authMode === "signup" && !name) {
-    error.textContent = "Add the name your partner will see.";
+async function submitAuth({ name, lastName, email, password }, error, button) {
+  if (S.authMode === "signup" && (!name || !lastName)) {
+    error.textContent = "Add your first and last name. Your partner sees them when pairing with you.";
     error.hidden = false;
     return;
   }
@@ -315,7 +326,7 @@ async function submitAuth({ name, email, password }, error, button) {
       } else {
         user = (await createUserWithEmailAndPassword(auth, email, password)).user;
       }
-      const profile = { displayName: name };
+      const profile = { displayName: name, lastName };
       if (wasAnonymous && legacy.coupleId) profile.coupleId = legacy.coupleId;
       await makeApi(db, user.uid).saveProfile(profile);
       // Consumed: the next person to use this browser shouldn't see it.
@@ -368,12 +379,14 @@ function renderOnboarding() {
 }
 
 function nameView() {
-  const input = h("input", { type: "text", id: "nameInput", placeholder: "Your name", autocomplete: "given-name", maxlength: "30" });
+  const first = h("input", { type: "text", id: "nameInput", placeholder: "First name", autocomplete: "given-name", maxlength: "30", value: S.name });
+  const last = h("input", { type: "text", id: "lastNameInput", placeholder: "Last name", autocomplete: "family-name", maxlength: "30", value: S.lastName });
   const error = h("p", { class: "error", hidden: true });
-  const go = h("button", { class: "btn primary", id: "continueButton", disabled: true, onclick: async () => {
+  const ready = () => first.value.trim() && last.value.trim();
+  const go = h("button", { class: "btn primary", id: "continueButton", disabled: !ready(), onclick: async () => {
     go.disabled = true;
     try {
-      await S.api.saveProfile({ displayName: input.value.trim() });
+      await S.api.saveProfile({ displayName: first.value.trim(), lastName: last.value.trim() });
     } catch (e) {
       console.error("saveProfile failed", e);
       error.textContent = friendly(e, "Couldn't save. Try again.");
@@ -381,11 +394,14 @@ function nameView() {
       go.disabled = false;
     }
   } }, "Continue");
-  input.addEventListener("input", () => { go.disabled = !input.value.trim(); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !go.disabled) go.click(); });
+  for (const input of [first, last]) {
+    input.addEventListener("input", () => { go.disabled = !ready(); });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !go.disabled) go.click(); });
+  }
   return h("div", { class: "card stack" },
-    h("h2", {}, "What should your partner see your name as?"),
-    input, error, go);
+    h("h2", {}, "What's your name?"),
+    h("p", { class: "muted small" }, "Your partner sees it when confirming they're pairing with you."),
+    first, last, error, go);
 }
 
 function choiceView() {
@@ -409,7 +425,7 @@ async function startCreate() {
     // On success the account record gains the coupleId, and every signed-in
     // device (this one included) moves to the countdown, whose "waiting for
     // your partner" card shows the code to share.
-    await S.api.createCouple(generateJoinCode(), S.name, timeZone());
+    await S.api.createCouple(generateJoinCode(), S.name, S.lastName, timeZone());
   } catch (e) {
     console.error("createCouple failed", e);
     S.createError = friendly(e, "Couldn't create the pairing. Try again.");
@@ -447,33 +463,60 @@ function shareButtons(code) {
 }
 
 function joinView() {
-  const input = h("input", { type: "text", id: "joinCodeInput", placeholder: "ABC123", autocapitalize: "characters", autocomplete: "off", spellcheck: "false", maxlength: "12", value: S.prefillCode });
+  return h("div", { class: "card stack" },
+    h("h2", {}, "Enter your partner's code"),
+    joinForm({ initialCode: S.prefillCode }),
+    h("button", { class: "btn link", onclick: () => { S.prefillCode = ""; S.step = "choice"; renderOnboarding(); } }, "Back"),
+  );
+}
+
+/**
+ * Code entry → "Pair with Alex Smith?" → join. The confirmation shows whose
+ * code it is before pairing, so nobody pairs with the wrong person by a
+ * mistyped or mixed-up code. `discarding` is this person's own unused code
+ * (both of them tapped Create): joining closes it in the same save.
+ */
+function joinForm({ initialCode = "", discarding = null, onJoined = () => {} } = {}) {
+  const input = h("input", { type: "text", id: "joinCodeInput", placeholder: "ABC123", autocapitalize: "characters", autocomplete: "off", spellcheck: "false", maxlength: "12", value: initialCode });
   const error = h("p", { class: "error", id: "joinError", hidden: true });
-  const go = h("button", { class: "btn primary", id: "joinButton", disabled: !S.prefillCode, onclick: async () => {
+  const showError = (text) => { error.textContent = text; error.hidden = false; go.disabled = false; };
+  const go = h("button", { class: "btn primary", id: "joinButton", disabled: !initialCode, onclick: async () => {
     const code = normalizeCode(input.value);
     if (!code) return;
     go.disabled = true;
     error.hidden = true;
+    let preview;
     try {
-      await S.api.joinCouple(code, S.name, timeZone());
-      S.prefillCode = "";
-      // The account record now has the coupleId; its listener takes it from here.
+      preview = await S.api.joinPreview(code);
     } catch (e) {
-      console.error("joinCouple failed", e);
-      // Deliberately generic: a wrong, already-full, cancelled, or expired
-      // code all fail the Security Rules identically (permission denied).
-      error.textContent = friendly(e, "Couldn't join. Check the code and try again.");
-      error.hidden = false;
-      go.disabled = false;
+      console.error("joinPreview failed", e);
+      return showError({
+        notFound: "There's no open pairing with that code. Check it with your partner.",
+        cancelled: "That code was cancelled. Ask your partner for their current one.",
+        ownCode: "That's your own code. Send it to your partner instead.",
+      }[e.problem] ?? friendly(e, "Couldn't check the code. Check your connection and try again."));
     }
+    const close = openModal(`Pair with ${preview.partnerName}?`, "Confirm pairing",
+      h("p", { id: "joinConfirmText" }, `Only pair if ${preview.partnerName} is your partner. You'll share one countdown and calendar.`),
+      h("button", { class: "btn primary", id: "joinConfirmButton", onclick: async (e) => {
+        e.target.disabled = true;
+        close();
+        try {
+          await S.api.joinCouple(preview.coupleId, S.name, S.lastName, timeZone(), discarding);
+          S.prefillCode = "";
+          onJoined();
+          // The account record now has the coupleId; its listener takes it from here.
+        } catch (err) {
+          console.error("joinCouple failed", err);
+          // The pairing filled up or was cancelled between the check and now.
+          showError(friendly(err, "Couldn't join. Check the code with your partner and try again."));
+        }
+      } }, "💞 Pair"),
+      h("button", { class: "btn link", onclick: () => { close(); go.disabled = false; } }, "Cancel"));
   } }, "Join");
   input.addEventListener("input", () => { go.disabled = !input.value.trim(); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !go.disabled) go.click(); });
-  return h("div", { class: "card stack" },
-    h("h2", {}, "Enter your partner's code"),
-    input, error, go,
-    h("button", { class: "btn link", onclick: () => { S.prefillCode = ""; S.step = "choice"; renderOnboarding(); } }, "Back"),
-  );
+  return h("div", { class: "stack" }, input, error, go);
 }
 
 // ---------- main shell ----------
@@ -608,7 +651,7 @@ function partnerProfile() {
 function syncOwnTimeZone() {
   const mine = S.couple?.partnerProfiles[S.user?.uid];
   if (!mine || mine.timeZoneIdentifier === timeZone()) return;
-  S.api.ensurePartnerProfile(S.coupleId, mine.displayName, timeZone()).catch((e) => console.error("syncOwnTimeZone failed", e));
+  S.api.ensurePartnerProfile(S.coupleId, mine.displayName, mine.lastName, timeZone()).catch((e) => console.error("syncOwnTimeZone failed", e));
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && S.screen === "main") syncOwnTimeZone();
@@ -617,8 +660,11 @@ document.addEventListener("visibilitychange", () => {
 /** A join whose second write failed leaves this person nameless on the couple doc. */
 function ensureOwnProfile() {
   const c = S.couple;
-  if (!c || !S.name || !c.participantUIDs.includes(S.user?.uid) || c.partnerProfiles[S.user.uid]) return;
-  S.api.ensurePartnerProfile(S.coupleId, S.name, timeZone()).catch((e) => console.error("ensurePartnerProfile failed", e));
+  if (!c || !S.name || !c.participantUIDs.includes(S.user?.uid)) return;
+  const mine = c.partnerProfiles[S.user.uid];
+  // Also adds a last name the account gained later, so the partner's view is complete.
+  if (mine && (!S.lastName || mine.lastName === S.lastName)) return;
+  S.api.ensurePartnerProfile(S.coupleId, S.name, S.lastName, mine?.timeZoneIdentifier ?? timeZone()).catch((e) => console.error("ensurePartnerProfile failed", e));
 }
 
 /** Visits and important dates, shared by the countdown's "Coming up" and the Calendar tab. */
@@ -1258,7 +1304,7 @@ function settingsView() {
   return h("div", {},
     h("div", { class: "card stack" }, h("h2", {}, "Theme"), h("p", { class: "muted small" }, "Saved on this device."), h("div", { class: "swatches" }, swatches)),
     h("div", { class: "card stack" }, h("h2", {}, "Account"),
-      h("p", { class: "muted small", id: "accountEmail" }, `Signed in as ${S.user?.email || ""}${S.name ? ` (${S.name})` : ""}.`),
+      h("p", { class: "muted small", id: "accountEmail" }, `Signed in as ${S.user?.email || ""}${S.name ? ` (${fullName(S.name, S.lastName)})` : ""}.`),
       h("p", { class: "muted small" }, partner
         ? `Paired with ${partner}. Sign in with this account on any phone or computer to see the same countdown.`
         : "Sign in with this account on any phone or computer to see the same countdown."),
@@ -1281,12 +1327,20 @@ function waitingCard() {
       cancel.disabled = false;
     }
   } }, "Both tapped Create? Cancel this one");
+  // Both tapped Create: join the partner's code, which discards this one in
+  // the same save. It used to take cancelling this one first.
+  const joinInstead = h("button", { class: "btn", id: "joinInsteadButton", onclick: () => {
+    const close = openModal("Join your partner's code", "Join your partner's code",
+      h("p", { class: "muted small" }, `Your own code, ${S.coupleId}, stops working once you join theirs.`),
+      joinForm({ discarding: S.coupleId, onJoined: () => close() }),
+      h("button", { class: "btn link", onclick: () => close() }, "Cancel"));
+  } }, "💌 Have your partner's code? Join theirs instead");
   return h("div", { class: "card stack", id: "waitingCard" },
     h("h2", {}, "Waiting for your partner 💌"),
     h("div", { class: "code", id: "generatedCode" }, S.coupleId),
     shareButtons(S.coupleId),
     h("p", { class: "muted small" }, "Send this to your partner. They create their own account, tap “Join a pairing”, and enter it on the web or in the iPhone app."),
-    error, cancel);
+    joinInstead, error, cancel);
 }
 
 function leavePairingButton() {

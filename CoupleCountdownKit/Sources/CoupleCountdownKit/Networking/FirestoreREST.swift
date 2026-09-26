@@ -118,7 +118,7 @@ public enum FirestoreREST {
                 let displayName = string(entryFields["displayName"]),
                 let timeZoneIdentifier = string(entryFields["timeZoneIdentifier"])
             else { continue }
-            result[uid] = PartnerProfile(displayName: displayName, timeZoneIdentifier: timeZoneIdentifier)
+            result[uid] = PartnerProfile(displayName: displayName, lastName: string(entryFields["lastName"]), timeZoneIdentifier: timeZoneIdentifier)
         }
         return result
     }

@@ -301,7 +301,7 @@ couples/{coupleId}                      // coupleId is the human-shareable join 
                                         // upcoming visit (§7.5)
   - participantUIDs: [String]           // Firebase Auth UIDs (one per account), max 2
   - partnerProfiles: {                  // map keyed by uid
-      [uid]: { displayName, timeZoneIdentifier }
+      [uid]: { displayName, lastName?, timeZoneIdentifier }
     }
   - lastUpdatedBy: uid
   - lastUpdatedAt: Timestamp            // FieldValue.serverTimestamp()
@@ -312,7 +312,8 @@ couples/{coupleId}                      // coupleId is the human-shareable join 
                                         // start of the first stretch apart (§7.2)
 
 users/{uid}                             // one per account; owner-only (§5.3 note)
-  - displayName: String
+  - displayName: String                 // first name: what the app calls them
+  - lastName: String?                   // shown in the "Pair with …?" confirmation
   - coupleId: String?                   // the account's current pairing
 
 couples/{coupleId}/visits/{visitId}     // planned meetups, see §7.5
@@ -488,7 +489,20 @@ failure mode for that).
    and for a partner who doesn't have the iPhone app.)*
 4. **Partner B ("Join")**: types the code (or uses the best-effort QR/deep
    link above). App fetches `couples/{code}`, and if
-   `participantUIDs.size() < 2`, appends `uidB`.
+   `participantUIDs.size() < 2`, appends `uidB`. *(As built:*
+   - *The fetch now drives a confirmation. It shows "Pair with Alex
+     Smith?", the code owner's first and last name, and B confirms before
+     anything is written. Sign-up asks for both names; accounts made
+     before that are asked for their last name before creating or joining.*
+   - *Clear errors: a code that doesn't exist or is already full, one that
+     was cancelled, and your own code.*
+   - *Joining someone else discards your own unused code. When both
+     partners tapped Create, "Join theirs instead" on the waiting card
+     joins the partner's code and closes your own in the same batch (the
+     rules allow closing only while nobody has joined). So the unused code
+     can never be joined afterwards; it used to take cancelling it first.*
+   - *The invite link opens the web app with the code saved. There the
+     partner creates an account or signs in, then confirms.)*
 5. **Security**: enforced entirely by Firestore Security Rules, no Cloud
    Function needed. Once a code is used to pair two participants, it stops
    granting access to anyone else, not just for joining, but for reading:

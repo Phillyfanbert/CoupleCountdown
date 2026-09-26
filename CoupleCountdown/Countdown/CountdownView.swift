@@ -9,6 +9,8 @@ struct CountdownView: View {
     /// This person's name from their account, used to fill in their entry
     /// on the couple doc if a join's second write never landed.
     let displayName: String?
+    /// And last name: shown to a partner confirming they're pairing with you.
+    let lastName: String?
 
     @StateObject private var sync: SyncCoordinator
     @StateObject private var viewModel: CountdownViewModel
@@ -22,6 +24,8 @@ struct CountdownView: View {
     @AppStorage("metUpAskedFor") private var metUpAskedFor: Double = 0
     @AppStorage("metUpNotYetFor") private var metUpNotYetFor: Double = 0
     @State private var isConfirmingCancel = false
+    /// "Join your partner's code instead", from the waiting card.
+    @State private var isJoiningPartnersCode = false
     @State private var cancelError: String?
     @State private var leaveError: String?
     /// True while a status change runs, and for a second after: the main
@@ -45,10 +49,11 @@ struct CountdownView: View {
 
     private let firestore: FirestoreService
 
-    init(coupleId: String, uid: String, displayName: String? = nil) {
+    init(coupleId: String, uid: String, displayName: String? = nil, lastName: String? = nil) {
         self.coupleId = coupleId
         self.uid = uid
         self.displayName = displayName
+        self.lastName = lastName
         let firestore = FirestoreService()
         self.firestore = firestore
         _sync = StateObject(wrappedValue: SyncCoordinator(
@@ -297,6 +302,13 @@ struct CountdownView: View {
             if let cancelError {
                 Text(cancelError).font(.caption).foregroundStyle(.red)
             }
+            // Both tapped Create: join the partner's code, which discards this
+            // one in the same save. It used to take cancelling this one first.
+            Button("Have your partner's code? Join theirs instead") {
+                isJoiningPartnersCode = true
+            }
+            .font(.footnote.weight(.semibold))
+            .accessibilityIdentifier("joinInsteadButton")
             Button("Both tapped Create? Cancel this one") {
                 isConfirmingCancel = true
             }
@@ -313,6 +325,15 @@ struct CountdownView: View {
         // could never be found.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("waitingForPartnerCard")
+        .sheet(isPresented: $isJoiningPartnersCode) {
+            JoinPairingView(
+                displayName: displayName ?? "",
+                lastName: lastName,
+                ownCode: coupleId
+            ) {
+                isJoiningPartnersCode = false
+            }
+        }
         .confirmationDialog("Cancel this pairing?", isPresented: $isConfirmingCancel, titleVisibility: .visible) {
             Button("Cancel pairing", role: .destructive) {
                 Task { await cancelPairing() }
@@ -585,16 +606,19 @@ struct CountdownView: View {
 
     /// A join whose second write failed leaves this person without a name
     /// on the couple doc (their partner sees no name or clock for them).
+    /// Also adds a last name the account gained later (accounts made before
+    /// it was asked for), so the partner's view of them is complete.
     private func ensureOwnProfile(state: RelationshipState) async {
-        guard state.participantUIDs.contains(uid),
-              state.partnerProfiles[uid] == nil,
-              let displayName, !displayName.isEmpty
-        else { return }
+        guard state.participantUIDs.contains(uid), let displayName, !displayName.isEmpty else { return }
+        let existing = state.partnerProfiles[uid]
+        let missingLastName = (lastName?.isEmpty == false) && existing?.lastName != lastName
+        guard existing == nil || missingLastName else { return }
         try? await firestore.ensurePartnerProfile(
             coupleId: coupleId,
             uid: uid,
             displayName: displayName,
-            timeZoneIdentifier: TimeZone.autoupdatingCurrent.identifier
+            lastName: lastName,
+            timeZoneIdentifier: existing?.timeZoneIdentifier ?? TimeZone.autoupdatingCurrent.identifier
         )
     }
 
@@ -612,6 +636,7 @@ struct CountdownView: View {
             coupleId: coupleId,
             uid: uid,
             displayName: mine.displayName,
+            lastName: mine.lastName,
             timeZoneIdentifier: zone
         )
     }

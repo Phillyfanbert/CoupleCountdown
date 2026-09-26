@@ -9,12 +9,30 @@ public struct PartnerProfile: Codable, Equatable, Sendable {
     /// it with a misleading "couldn't sign in".
     public static let maxNameLength = 30
 
+    /// First name: what the app calls them ("Sam is thinking of you").
     public var displayName: String
+    /// Shown with the first name when the partner confirms a pairing
+    /// ("Pair with Sam Lee?"), so they know it's the right person. Nil for
+    /// accounts made before it was asked for.
+    public var lastName: String?
     public var timeZoneIdentifier: String
 
-    public init(displayName: String, timeZoneIdentifier: String) {
+    public init(displayName: String, lastName: String? = nil, timeZoneIdentifier: String) {
         self.displayName = displayName
+        self.lastName = lastName
         self.timeZoneIdentifier = timeZoneIdentifier
+    }
+
+    /// "Sam Lee", or just "Sam" without a last name.
+    public var fullName: String {
+        Self.fullName(first: displayName, last: lastName)
+    }
+
+    public static func fullName(first: String, last: String?) -> String {
+        [first, last ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     public var timeZone: TimeZone {

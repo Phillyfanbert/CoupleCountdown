@@ -292,6 +292,39 @@ describe('couples/{coupleId}: time tracking writes', () => {
   });
 });
 
+describe('couples/{coupleId}: joining a partner discards your own unused code', () => {
+  const OWN = 'OWNC0D';
+
+  async function seedOwn(participantUIDs) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'couples', OWN), {
+        status: 'apart', participantUIDs, partnerProfiles: {}, lastUpdatedBy: participantUIDs[0], lastUpdatedAt: new Date(),
+      });
+    });
+  }
+
+  function joinAndDiscard(uid) {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'couples', COUPLE_ID), { participantUIDs: [UID_A, uid] });
+    batch.set(doc(db, 'users', uid), { displayName: 'Sam', lastName: 'Lee', coupleId: COUPLE_ID }, { merge: true });
+    batch.update(doc(db, 'couples', OWN), { closed: true });
+    return batch.commit();
+  }
+
+  it('joins the partner and closes your own open code in one batch', async () => {
+    await seedCouple([UID_A]);
+    await seedOwn([UID_B]);
+    await assertSucceeds(joinAndDiscard(UID_B));
+  });
+
+  it('refuses the whole batch if your own code already has a partner in it', async () => {
+    await seedCouple([UID_A]);
+    await seedOwn([UID_B, UID_C]);
+    await assertFails(joinAndDiscard(UID_B));
+  });
+});
+
 describe('couples/{coupleId}/pings: "thinking of you"', () => {
   const since = new Date(Date.now() - 5 * 86400000);
   const recentPings = (uid) =>
@@ -348,6 +381,12 @@ describe('users/{userId}: per-account record', () => {
   it('rejects unauthenticated reads and writes', async () => {
     await assertFails(getDoc(userDoc(null, UID_A)));
     await assertFails(setDoc(userDoc(null, UID_A), { displayName: 'Alex' }));
+  });
+
+  it('lets an account record a last name, within limits', async () => {
+    await assertSucceeds(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', lastName: 'Smith' }));
+    await assertFails(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', lastName: 42 }));
+    await assertFails(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', lastName: 'x'.repeat(61) }));
   });
 
   it('rejects unexpected fields', async () => {

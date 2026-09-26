@@ -244,6 +244,21 @@ final class SeparationTests: XCTestCase {
     }
 }
 
+final class PartnerNameTests: XCTestCase {
+    func testFullNameForTheJoinConfirmation() {
+        XCTAssertEqual(PartnerProfile(displayName: "Sam", lastName: "Lee", timeZoneIdentifier: "UTC").fullName, "Sam Lee")
+        // Accounts from before last names were asked for.
+        XCTAssertEqual(PartnerProfile(displayName: "Sam", timeZoneIdentifier: "UTC").fullName, "Sam")
+        XCTAssertEqual(PartnerProfile.fullName(first: " Sam ", last: "  "), "Sam")
+    }
+
+    func testOlderCachedProfilesWithoutALastNameStillDecode() throws {
+        let json = #"{"displayName": "Sam", "timeZoneIdentifier": "Europe/London"}"#
+        let profile = try JSONDecoder().decode(PartnerProfile.self, from: Data(json.utf8))
+        XCTAssertNil(profile.lastName)
+    }
+}
+
 final class JoinLinkTests: XCTestCase {
     func testInviteLinkOpensTheWebAppWithTheCodeFilledIn() {
         // web/app.js reads ?join= to prefill the Join screen.
