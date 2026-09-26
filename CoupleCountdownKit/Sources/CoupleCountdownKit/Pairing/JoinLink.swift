@@ -1,4 +1,4 @@
-// JoinLink.swift — the invite link for a join code
+// JoinLink.swift: the invite link for a join code
 
 import Foundation
 

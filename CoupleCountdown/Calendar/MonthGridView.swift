@@ -1,4 +1,4 @@
-// MonthGridView.swift — a month of days with markers for visits and important dates
+// MonthGridView.swift: a month of days with markers for visits and important dates
 
 import SwiftUI
 

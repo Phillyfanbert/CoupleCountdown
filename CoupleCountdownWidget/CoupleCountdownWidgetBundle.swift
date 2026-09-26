@@ -1,4 +1,4 @@
-// CoupleCountdownWidgetBundle.swift — @main WidgetBundle entry point (DESIGN.md §6)
+// CoupleCountdownWidgetBundle.swift: @main WidgetBundle entry point (DESIGN.md §6)
 
 import WidgetKit
 import SwiftUI

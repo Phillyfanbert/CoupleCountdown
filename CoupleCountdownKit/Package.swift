@@ -1,7 +1,7 @@
 // swift-tools-version:5.10
 import PackageDescription
 
-// Platform version is a placeholder — DESIGN.md §4's policy is "latest
+// Platform version is a placeholder: DESIGN.md §4's policy is "latest
 // publicly released iOS at build time," so bump this to match whenever
 // the project is actually built.
 let package = Package(

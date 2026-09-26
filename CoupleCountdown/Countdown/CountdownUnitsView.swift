@@ -1,4 +1,4 @@
-// CountdownUnitsView.swift — the live days / hours / minutes / seconds readout (DESIGN.md §6, §9)
+// CountdownUnitsView.swift: the live days / hours / minutes / seconds readout (DESIGN.md §6, §9)
 
 import SwiftUI
 import CoupleCountdownKit

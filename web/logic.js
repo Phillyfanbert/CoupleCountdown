@@ -1,7 +1,7 @@
-// logic.js — pure functions ported from CoupleCountdownKit (CumulativeStatsCalculator,
+// logic.js: pure functions ported from CoupleCountdownKit (CumulativeStatsCalculator,
 // ImportantDate, CalendarDay, MeetupPlanner, CountdownFormatter). No DOM, no Firebase,
 // so they run in the browser and under `node --test` unchanged. Keep in step with the
-// Swift versions — both apps read the same data.
+// Swift versions, both apps read the same data.
 
 const DAY_MS = 86_400_000;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -26,7 +26,7 @@ export function parseLocalISODate(value) {
 
 // ---------- calendar days (anniversaries, birthdays) ----------
 // A day with no time of day must read as the same day for both partners.
-// Stored as 12:00 UTC on that day and read back with UTC components — see
+// Stored as 12:00 UTC on that day and read back with UTC components, see
 // CalendarDay.swift. Storing local midnight showed dates a day early to a
 // partner further west.
 
@@ -42,7 +42,7 @@ export function dayFromStored(stored) {
 
 /**
  * Next occurrence (local midnight) of a day given as local midnight. A yearly
- * date on today's day is today, not next year — compared against the start of
+ * date on today's day is today, not next year, compared against the start of
  * today, not the current instant.
  */
 export function nextOccurrence(date, repeatsAnnually, now = new Date()) {
@@ -66,8 +66,8 @@ export function relativeDayLabel(days) {
 }
 
 // ---------- visits (planned meetups) ----------
-// How nextMeetupDate — what the main countdown and the widget count down
-// to — follows the planned visits. Mirrors MeetupPlanner.swift.
+// How nextMeetupDate (what the main countdown and the widget count down
+// to) follows the planned visits. Mirrors MeetupPlanner.swift.
 
 /** The earliest visit that hasn't started yet. */
 export function nextUpcoming(visits, now = new Date()) {
@@ -100,7 +100,7 @@ export const MET_EARLY_WINDOW_MS = 24 * 3_600_000;
 /**
  * Saying you're together shortly *before* the planned visit's start: that
  * visit is happening now. Returns the visit the countdown pointed at if it's
- * due within MET_EARLY_WINDOW_MS, so it can be moved to now — otherwise
+ * due within MET_EARLY_WINDOW_MS, so it can be moved to now, otherwise
  * "Leaving again" before its original time counted down to it again.
  * Mirrors MeetupPlanner.visitMetEarly.
  */
@@ -120,7 +120,7 @@ function partsIn(date, timeZone) {
 
 /**
  * The instant when the clock in `timeZone` reads year-month-day hour:minute
- * (month 1–12) — for entering a visit in the partner's time. Two passes so
+ * (month 1–12), for entering a visit in the partner's time. Two passes so
  * a daylight-saving change between the guess and the answer can't skew it.
  */
 export function zonedTime(year, month, day, hour, minute, timeZone) {
@@ -204,7 +204,7 @@ export function countdownParts(target, now = new Date()) {
 }
 
 /**
- * Events oldest first, preceded by the implicit "apart" at pairing — pairings
+ * Events oldest first, preceded by the implicit "apart" at pairing: pairings
  * start apart, but no event marks it. Events without a timestamp (a write
  * still pending on the server) are skipped.
  */
@@ -282,7 +282,7 @@ export function reunionMessage(partnerName, apartForMs) {
   return `Congratulations! You're together again${after} 💞`;
 }
 
-/** "Sam: 9:14 PM CDT" — display-only partner clock (DESIGN.md §9.1). */
+/** "Sam: 9:14 PM CDT": display-only partner clock (DESIGN.md §9.1). */
 export function localTimeLabel(label, timeZone, now = new Date()) {
   try {
     const time = new Intl.DateTimeFormat(undefined, {

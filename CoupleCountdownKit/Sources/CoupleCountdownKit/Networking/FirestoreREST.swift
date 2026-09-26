@@ -1,10 +1,10 @@
-// FirestoreREST.swift — decoding Firestore REST responses for the widget (DESIGN.md §5.2 #4, §5.5)
+// FirestoreREST.swift: decoding Firestore REST responses for the widget (DESIGN.md §5.2 #4, §5.5)
 
 import Foundation
 
 /// Decodes the Firestore REST API's typed JSON (`{"stringValue": …}`,
 /// `{"timestampValue": …}`, …) into the Kit's models. Lives here rather than
-/// in the widget target so it's unit-tested in CI — the widget itself can't
+/// in the widget target so it's unit-tested in CI: the widget itself can't
 /// be exercised there, and a decoding bug in it fails silently (the widget
 /// just falls back to the app's cache).
 public enum FirestoreREST {

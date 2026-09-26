@@ -1,4 +1,4 @@
-// CumulativeStatsCalculator.swift — time together and apart, from the event log (DESIGN.md §7.2)
+// CumulativeStatsCalculator.swift: time together and apart, from the event log (DESIGN.md §7.2)
 
 import Foundation
 
@@ -30,7 +30,7 @@ public struct Separation: Equatable, Sendable {
 
 public enum CumulativeStatsCalculator {
     /// Walks the append-only event log and sums the duration of each
-    /// together/apart span (DESIGN.md §7.2) — derived, not stored. The
+    /// together/apart span (DESIGN.md §7.2), derived, not stored. The
     /// final span (from the last event to `now`) counts toward whichever
     /// status it currently reflects, since the couple hasn't toggled
     /// since then.
@@ -64,7 +64,7 @@ public enum CumulativeStatsCalculator {
 
     /// Every stretch apart, oldest first: from each parting (or the pairing)
     /// to the reunion that ended it; the last is open while still apart. A
-    /// repeated event of the same kind — both partners tapping at once —
+    /// repeated event of the same kind, both partners tapping at once:
     /// doesn't start a new one. Mirrors separations in web/logic.js.
     public static func separations(events: [RelationshipEvent], pairedAt: Date? = nil) -> [Separation] {
         var result: [Separation] = []

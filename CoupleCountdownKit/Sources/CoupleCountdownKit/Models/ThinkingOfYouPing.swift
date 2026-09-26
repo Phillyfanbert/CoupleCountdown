@@ -1,12 +1,12 @@
-// ThinkingOfYouPing.swift — "thinking of you" nudge model and who-sees-what logic (DESIGN.md §5.1, §7.1)
+// ThinkingOfYouPing.swift: "thinking of you" nudge model and who-sees-what logic (DESIGN.md §5.1, §7.1)
 
 import Foundation
 
 /// Mirrors `couples/{coupleId}/pings/{pingId}` (DESIGN.md §5.1, §7.1).
-/// Never written into the permanent event log — a nudge isn't a milestone.
+/// Never written into the permanent event log: a nudge isn't a milestone.
 ///
 /// `expiresAt` is a separate field from `sentAt`, not a TTL policy applied
-/// to `sentAt` directly — a TTL field must hold the *expiration* instant,
+/// to `sentAt` directly: a TTL field must hold the *expiration* instant,
 /// not the creation instant. Applying TTL straight to `sentAt` would make
 /// every ping eligible for deletion the moment it's created. (No TTL
 /// policy is configured on the project yet; the field is there for one.)
@@ -19,7 +19,7 @@ public struct ThinkingOfYouPing: Codable, Equatable, Identifiable, Sendable {
     public var sentAt: Date
     public var expiresAt: Date
     /// Set when the recipient dismisses it (or sends one back), on any of
-    /// their devices — so all of them stop showing it.
+    /// their devices, so all of them stop showing it.
     public var seenAt: Date?
 
     public init(id: String, sentBy: String, sentAt: Date, expiresAt: Date? = nil, seenAt: Date? = nil) {

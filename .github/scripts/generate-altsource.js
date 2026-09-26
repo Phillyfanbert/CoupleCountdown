@@ -1,4 +1,4 @@
-// generate-altsource.js — builds the AltStore/SideStore "source" manifest
+// generate-altsource.js: builds the AltStore/SideStore "source" manifest
 // for the CI-produced .ipa (see .github/workflows/build.yml,
 // build-device-ipa job). Both apps understand this JSON format as an
 // addable source, so the app can show up with install/update buttons

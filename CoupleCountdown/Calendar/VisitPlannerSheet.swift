@@ -1,4 +1,4 @@
-// VisitPlannerSheet.swift — pick a date *and time* for a visit
+// VisitPlannerSheet.swift: pick a date *and time* for a visit
 
 import SwiftUI
 import CoupleCountdownKit
@@ -6,7 +6,7 @@ import CoupleCountdownKit
 /// Used when leaving ("when do you see each other next?"), when planning or
 /// changing the next visit from the countdown, and from the calendar.
 ///
-/// Takes a real meeting time — the countdown ends when the flight lands, not
+/// Takes a real meeting time: the countdown ends when the flight lands, not
 /// at some arbitrary hour. The old date-only picker left the countdown ending
 /// at whatever time of day the screen happened to be built, and it accepted
 /// dates in the past.
@@ -58,7 +58,7 @@ struct VisitPlannerSheet: View {
         Date(timeIntervalSince1970: ((now.timeIntervalSince1970 + 20) / 60).rounded(.up) * 60)
     }
 
-    /// A week from today at 6 PM — computed each time the sheet opens, not
+    /// A week from today at 6 PM, computed each time the sheet opens, not
     /// once when the screen behind it was built (that default went stale).
     static func defaultStart(now: Date = Date(), calendar: Calendar = .current) -> Date {
         let weekAhead = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: now)) ?? now
@@ -102,7 +102,7 @@ struct VisitPlannerSheet: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("visitZoneSummary")
                 }
-                TextField("Note (optional) — e.g. Sam lands at LAX", text: $note)
+                TextField("Note (optional), e.g. Sam lands at LAX", text: $note)
                     .accessibilityIdentifier("visitNoteField")
                 // Shown inside the sheet: a save failure shown only on the
                 // screen underneath would be invisible while this is up.

@@ -1,4 +1,4 @@
-// CountdownView.swift — main countdown screen, status toggle, time zone display (DESIGN.md §8, §9, §9.1)
+// CountdownView.swift: main countdown screen, status toggle, time zone display (DESIGN.md §8, §9, §9.1)
 
 import SwiftUI
 import CoupleCountdownKit
@@ -6,7 +6,7 @@ import CoupleCountdownKit
 struct CountdownView: View {
     let coupleId: String
     let uid: String
-    /// This person's name from their account — used to fill in their entry
+    /// This person's name from their account, used to fill in their entry
     /// on the couple doc if a join's second write never landed.
     let displayName: String?
 
@@ -33,8 +33,8 @@ struct CountdownView: View {
 
     // Tracks which milestones have already been shown, so reopening the
     // app or the view reloading doesn't re-celebrate the same one every
-    // time (DESIGN.md §7.3 never specified this, but the alternative —
-    // celebrating "100 days!" on every launch — would be more annoying
+    // time (DESIGN.md §7.3 never specified this, but the alternative
+    // (celebrating "100 days!" on every launch) would be more annoying
     // than delightful).
     @AppStorage("celebratedMilestones", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
     private var celebratedMilestonesRaw: String = ""
@@ -69,7 +69,7 @@ struct CountdownView: View {
 
     var body: some View {
         NavigationStack {
-            // Was a bare VStack, not a scrollable container — SwiftUI's
+            // Was a bare VStack, not a scrollable container: SwiftUI's
             // .refreshable gesture generally doesn't surface without a
             // List/ScrollView, so the manual pull-to-refresh fallback
             // (§5.2 mechanism #5) was effectively unreachable. Wrapping
@@ -112,7 +112,7 @@ struct CountdownView: View {
         }
         .tint(theme.accentColor)
         .task {
-            // Gated behind a launch argument only XCUITest ever passes —
+            // Gated behind a launch argument only XCUITest ever passes:
             // real milestone triggering needs either elapsed real time or
             // a past nextMeetupDate, neither practical to arrange from a
             // UI test. This verifies the overlay itself (render, tap to
@@ -125,7 +125,7 @@ struct CountdownView: View {
                 celebrationMessage = "Test celebration! 🎉"
             }
             // .onChange(of: scenePhase) below only fires on a transition,
-            // never for the view's initial value — on a normal launch the
+            // never for the view's initial value, on a normal launch the
             // scene is already .active before this view ever appears, so
             // that "change" is never observed there. Starting the listener
             // here too is what actually makes §5.2 mechanism #1 (realtime
@@ -185,7 +185,7 @@ struct CountdownView: View {
         }
         .overlay {
             if let celebrationMessage {
-                // Real users get the deliberately brief default (4s) —
+                // Real users get the deliberately brief default (4s):
                 // under XCUITest that same window raced against real
                 // network/automation overhead (app-idle waits, the
                 // Firestore round-trip in refreshHistory) and the
@@ -214,7 +214,7 @@ struct CountdownView: View {
             }
 
             if let state = sync.state {
-                // What the partner sees when you tap "thinking of you" —
+                // What the partner sees when you tap "thinking of you":
                 // it used to be sent and never shown anywhere.
                 if let newest = pings.unseen.first {
                     ReceivedPingCard(
@@ -275,7 +275,7 @@ struct CountdownView: View {
     }
 
     /// Shown until the partner joins. Before accounts, the code was only
-    /// ever visible on the create screen — once past it, there was no way
+    /// ever visible on the create screen, once past it, there was no way
     /// to see it again. Also where a mistaken pairing gets cancelled (the
     /// realistic case: both partners tapped Create).
     private var waitingForPartnerCard: some View {
@@ -290,7 +290,7 @@ struct CountdownView: View {
                 Label("Share invite", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.bordered)
-            Text("They create their own account, tap Join, and enter this — in the app or on the web.")
+            Text("They create their own account, tap Join, and enter this in the app or on the web.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -307,7 +307,7 @@ struct CountdownView: View {
         .frame(maxWidth: .infinity)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         // .contain first: an identifier on a plain stack is pushed down onto
-        // every child, replacing theirs — CI's accessibility snapshots showed
+        // every child, replacing theirs: CI's accessibility snapshots showed
         // the code text and the cancel button both reporting
         // "waitingForPartnerCard", so waitingCodeText/cancelPairingButton
         // could never be found.
@@ -363,7 +363,7 @@ struct CountdownView: View {
             // device on this account to onboarding.
             try await firestore.forgetPairing(uid: uid)
         } catch {
-            leaveError = "Couldn't leave — check your connection and try again."
+            leaveError = "Couldn't leave. Check your connection and try again."
         }
     }
 
@@ -376,7 +376,7 @@ struct CountdownView: View {
         } catch {
             // The rules refuse to cancel once the partner has joined, so the
             // likely reason is that they just did.
-            cancelError = "Couldn't cancel — your partner may have just joined. If not, check your connection and try again."
+            cancelError = "Couldn't cancel. Your partner may have just joined. If not, check your connection and try again."
         }
     }
 
@@ -407,7 +407,7 @@ struct CountdownView: View {
                     .font(.footnote)
                     .accessibilityIdentifier("changeMeetupButton")
             } else if state.nextMeetupDate != nil {
-                // The countdown's done. Ask before celebrating — it used to
+                // The countdown's done. Ask before celebrating: it used to
                 // celebrate the instant the timer hit zero, even if the
                 // flight was late.
                 let saidNotYet = metUpNotYetFor == meetupKey(state)
@@ -460,7 +460,7 @@ struct CountdownView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("planVisitButton")
             }
-            // How long this stretch apart has lasted — the other half of
+            // How long this stretch apart has lasted: the other half of
             // tracking the time from parting to being together again.
             if state.status == .apart, let since = ongoingSeparation?.start {
                 Text("Apart for \(CountdownFormatter.durationLabel(now.timeIntervalSince(since))) so far")
@@ -599,7 +599,7 @@ struct CountdownView: View {
     }
 
     /// Keeps this person's time zone on the couple doc current, so the
-    /// partner's clock for them is right after they travel or move — it used
+    /// partner's clock for them is right after they travel or move: it used
     /// to be written once, at pairing. Runs on launch, on coming back to the
     /// app, and when the phone's time zone changes; not on every update, so
     /// two of this person's devices in different zones can't keep
@@ -630,7 +630,7 @@ struct CountdownView: View {
         return "\(meetup.timeIntervalSince1970)"
     }
 
-    /// Waits for the countdown to run out, then asks — once per meetup on
+    /// Waits for the countdown to run out, then asks, once per meetup on
     /// this device. Also closes the question if the partner answers first.
     private func askWhenCountdownEnds() async {
         guard let state = sync.state, state.status == .apart, let meetup = state.nextMeetupDate else {

@@ -1,4 +1,4 @@
-// PingInbox.swift — the partner's "thinking of you" pings waiting to be seen (DESIGN.md §7.1)
+// PingInbox.swift: the partner's "thinking of you" pings waiting to be seen (DESIGN.md §7.1)
 
 import Foundation
 import WidgetKit
@@ -6,7 +6,7 @@ import FirebaseFirestore
 import CoupleCountdownKit
 
 /// Watches recent pings while the app is open and keeps the partner's
-/// unseen ones — what the countdown screen's card shows. Also keeps the
+/// unseen ones: what the countdown screen's card shows. Also keeps the
 /// widget's copy of the newest one current, so a ping dismissed here (or on
 /// the web) leaves the Home Screen too.
 @MainActor

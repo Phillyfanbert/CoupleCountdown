@@ -1,4 +1,4 @@
-// CoupleTheme.swift — per-couple visual theme: background gradient + accent color (DESIGN.md §9)
+// CoupleTheme.swift: per-couple visual theme: background gradient + accent color (DESIGN.md §9)
 
 import SwiftUI
 import CoupleCountdownKit
@@ -7,7 +7,7 @@ import CoupleCountdownKit
 /// craft-time work. Each theme defines separate light/dark gradients
 /// (§9's own note: theme colors need contrast checked in both
 /// appearances, not just designed against one) plus a single accent
-/// color used for buttons, hearts, and other warm touches — chosen to
+/// color used for buttons, hearts, and other warm touches: chosen to
 /// read clearly against both variants rather than needing its own
 /// light/dark split.
 enum CoupleTheme: String, CaseIterable, Identifiable {
@@ -25,7 +25,7 @@ enum CoupleTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// A little personality for the theme picker — no functional role.
+    /// A little personality for the theme picker, no functional role.
     var emoji: String {
         switch self {
         case .blush: "💗"
@@ -65,7 +65,7 @@ enum CoupleTheme: String, CaseIterable, Identifiable {
 }
 
 /// Reads the shared @AppStorage-backed theme selection so any screen can
-/// apply it — same store as CoupleCountdownApp uses for `coupleId`, so
+/// apply it, same store as CoupleCountdownApp uses for `coupleId`, so
 /// the theme choice (like pairing) is shared across the app and widget
 /// rather than being per-device.
 struct ThemedBackground: ViewModifier {

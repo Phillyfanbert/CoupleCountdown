@@ -1,4 +1,4 @@
-// Color+Hex.swift — small hex-string initializer used by CoupleTheme (DESIGN.md §9)
+// Color+Hex.swift: small hex-string initializer used by CoupleTheme (DESIGN.md §9)
 
 import SwiftUI
 

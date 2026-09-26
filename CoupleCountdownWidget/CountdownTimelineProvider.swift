@@ -1,4 +1,4 @@
-// CountdownTimelineProvider.swift — ~30-min-policy timeline provider (DESIGN.md §6 "Timeline provider entries/policy")
+// CountdownTimelineProvider.swift: ~30-min-policy timeline provider (DESIGN.md §6 "Timeline provider entries/policy")
 
 import WidgetKit
 import CoupleCountdownKit
@@ -13,7 +13,7 @@ struct CountdownEntry: TimelineEntry {
 struct CountdownTimelineProvider: TimelineProvider {
     private let cache = AppGroupCache(suiteName: SharedIdentifiers.appGroup)
 
-    // Real values from the Firebase project (couplecountdown-7715c) —
+    // Real values from the Firebase project (couplecountdown-7715c):
     // neither is a secret (DESIGN.md §5.7 discussion, Firebase's own docs:
     // the Web API key is a public identifier, not a credential; access
     // control comes entirely from the tested Security Rules).
@@ -22,7 +22,7 @@ struct CountdownTimelineProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> CountdownEntry {
         // First-run empty state: no cache yet if the widget's added
-        // before pairing completes (§6) — `state` being nil here is
+        // before pairing completes (§6): `state` being nil here is
         // exactly that case, not an error.
         cachedEntry()
     }
@@ -38,7 +38,7 @@ struct CountdownTimelineProvider: TimelineProvider {
 
     /// The app removes the App Group coupleId on sign-out and when the
     /// account leaves or cancels its pairing. Without a pairing the widget
-    /// shows its not-paired state — it used to fall back to the cached
+    /// shows its not-paired state: it used to fall back to the cached
     /// state regardless, so the previous account's countdown stayed on the
     /// Home Screen indefinitely.
     private var currentCoupleId: String? {
@@ -67,7 +67,7 @@ struct CountdownTimelineProvider: TimelineProvider {
                 }
             }
             // If a fetch failed for any reason, its value just stays
-            // whatever was already in the cache — never an error state
+            // whatever was already in the cache, never an error state
             // (§5.5 failure-mode behavior).
 
             // The widget can't redraw every second, so the countdown is the
@@ -83,7 +83,7 @@ struct CountdownTimelineProvider: TimelineProvider {
             }
             let entries = dates.map { CountdownEntry(date: $0, state: state, unseenPing: unseenPing) }
             // `.after(~30 min)` is a request, not a guarantee; WidgetKit's
-            // actual cadence is still OS-controlled (§5.2 #4) — `.never`
+            // actual cadence is still OS-controlled (§5.2 #4), `.never`
             // would starve updates, `.atEnd` risks hammering the refresh
             // budget (§6).
             let nextRefresh = now.addingTimeInterval(30 * 60)

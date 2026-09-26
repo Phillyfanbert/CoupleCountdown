@@ -2,7 +2,7 @@
 # Principle of least privilege: default-deny.
 #
 # Everything is ignored unless explicitly allowed below. This is the
-# opposite of a typical "ignore known junk" .gitignore — instead of trying
+# opposite of a typical "ignore known junk" .gitignore: instead of trying
 # to list every kind of file that *shouldn't* be committed (and inevitably
 # missing some new build artifact or local-machine file later), only file
 # types we've deliberately decided belong in version control are tracked.
@@ -10,7 +10,7 @@
 # Consequence to be aware of: adding a genuinely new *type* of file to the
 # project (not just a new file of an already-allowed type) means it won't
 # show up in `git status` until a matching "!" rule is added below. That's
-# intentional, not a bug — treat a file silently not appearing as a prompt
+# intentional, not a bug: treat a file silently not appearing as a prompt
 # to check it actually should be tracked before allowing it.
 # ============================================================================
 
@@ -18,7 +18,7 @@
 *
 
 # Always descend into directories so the allow-rules below can find files
-# inside them — without this, an ignored directory is never even looked at.
+# inside them: without this, an ignored directory is never even looked at.
 !*/
 
 # --- Explicitly allowed file types ---
@@ -32,7 +32,7 @@
 !*.swift
 !Package.resolved
 
-# Xcode project/target files (once a real .xcodeproj/.xcworkspace exists —
+# Xcode project/target files (once a real .xcodeproj/.xcworkspace exists:
 # none does yet, this just means they'll be tracked correctly when it does)
 !*.pbxproj
 !*.xcworkspacedata
@@ -49,13 +49,13 @@
 !*.jpg
 !*.jpeg
 
-# Firestore Security Rules test harness (firebase/) — plain Node.js/Mocha,
+# Firestore Security Rules test harness (firebase/): plain Node.js/Mocha,
 # no Xcode involved (DESIGN.md §10/§13).
 !*.js
 !*.rules
 
 # XcodeGen project spec (project.yml) and the GitHub Actions workflow that
-# builds it (DESIGN.md §5.6/§13) — CI generates the real .xcodeproj from
+# builds it (DESIGN.md §5.6/§13): CI generates the real .xcodeproj from
 # this rather than one being hand-authored or committed.
 !*.yml
 !*.yaml
@@ -63,15 +63,15 @@
 # --- Explicit re-exclusions (narrower than an allow-rule above) ---
 # Order matters: these come after the allow-rules so they win.
 
-# GoogleService-Info.plist is intentionally tracked, not excluded here —
+# GoogleService-Info.plist is intentionally tracked, not excluded here:
 # reversed from the original DESIGN.md §5.7 assumption. Every field in it
 # (API key, project ID, bundle ID, GCM sender ID) is confirmed non-secret
 # by Firebase's own docs; the API key is a public project identifier, not
-# a credential — access control comes entirely from the tested Security
+# a credential: access control comes entirely from the tested Security
 # Rules, not from hiding this file. Keeping it out of git would also break
 # CI, which checks out only tracked files and has no other way to obtain it.
 
-# Node.js dependencies & Firebase emulator artifacts — regenerable, never
+# Node.js dependencies & Firebase emulator artifacts: regenerable, never
 # source. node_modules/ is the big one: without this, the broad `!*.js`
 # and `!*.json` allow-rules above would happily track every file inside
 # every npm dependency.
@@ -83,13 +83,13 @@ pubsub-debug.log
 .firebase/
 firestore-export/
 
-# XcodeGen-generated output — regenerated from project.yml by CI (or
+# XcodeGen-generated output: regenerated from project.yml by CI (or
 # locally via `xcodegen generate`), never committed. project.yml is the
 # source of truth (DESIGN.md §5.6).
 /CoupleCountdown.xcodeproj/
 /Generated/
 
-# Xcode per-user/per-machine state — never portfolio-relevant, never
+# Xcode per-user/per-machine state: never portfolio-relevant, never
 # something a second machine should inherit.
 xcuserdata/
 *.xcuserstate
@@ -98,7 +98,7 @@ xcuserdata/
 *.xccheckout
 *.moved-aside
 
-# Build products & caches — always regenerable, never source.
+# Build products & caches: always regenerable, never source.
 build/
 DerivedData/
 .build/
@@ -110,7 +110,7 @@ DerivedData/
 # macOS
 .DS_Store
 
-# Web client (web/) — static HTML/CSS/JS + PWA manifest, hosted on Firebase
+# Web client (web/): static HTML/CSS/JS + PWA manifest, hosted on Firebase
 # Hosting's free tier. The Firebase project pointer lives in .firebaserc.
 !*.html
 !*.css

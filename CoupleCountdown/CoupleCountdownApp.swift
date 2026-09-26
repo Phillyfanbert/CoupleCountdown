@@ -1,4 +1,4 @@
-// CoupleCountdownApp.swift — @main app entry point (DESIGN.md §5.6)
+// CoupleCountdownApp.swift: @main app entry point (DESIGN.md §5.6)
 
 import SwiftUI
 import WidgetKit
@@ -14,7 +14,7 @@ struct CoupleCountdownApp: App {
     /// but never registered or scheduled, so it never ran: with the app
     /// closed, only the widget's own fetch kept anything fresh.
     /// Registered here, in a lazily created static, so it happens exactly once
-    /// even if SwiftUI builds the App value more than once — registering the
+    /// even if SwiftUI builds the App value more than once: registering the
     /// same task identifier twice crashes.
     private static let backgroundRefresh: BackgroundRefreshScheduler = {
         let scheduler = BackgroundRefreshScheduler(onRefresh: BackgroundRefreshScheduler.refreshWidgetData)
@@ -79,7 +79,7 @@ struct CoupleCountdownApp: App {
         }
     }
 
-    /// Signs out whatever the previous test left signed in — and deletes it if
+    /// Signs out whatever the previous test left signed in, and deletes it if
     /// it's a UI-test account, so CI runs don't pile up test users in the real
     /// Firebase project. Never touches an account outside the test domain.
     private func resetForUITests() async {

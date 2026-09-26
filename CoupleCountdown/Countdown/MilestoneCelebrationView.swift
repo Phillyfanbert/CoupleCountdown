@@ -1,4 +1,4 @@
-// MilestoneCelebrationView.swift — confetti-style overlay for milestone moments (DESIGN.md §7.3)
+// MilestoneCelebrationView.swift: confetti-style overlay for milestone moments (DESIGN.md §7.3)
 
 import SwiftUI
 
@@ -26,7 +26,7 @@ struct MilestoneCelebrationView: View {
             .shadow(radius: 20)
             .padding(24)
             // Without this, the VStack stays transparent to accessibility and
-            // only its Text children become elements — the identifier below
+            // only its Text children become elements: the identifier below
             // would attach to nothing queryable as a single unit.
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("milestoneCelebration")

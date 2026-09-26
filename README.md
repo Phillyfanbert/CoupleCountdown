@@ -40,7 +40,7 @@ has only been exercised in the Simulator so far. See
 
 ## Use it
 
-**On the web — any phone, tablet, or computer, nothing to install:**
+**On the web (any phone, tablet, or computer, nothing to install):**
 **<https://couplecountdown-7715c.web.app>**. On a phone, use Share → *Add to
 Home Screen* for an app-style icon. The web version has the core
 experience: pairing, the live countdown, apart/together, the calendar of
@@ -79,12 +79,12 @@ of devices.
 ## Why this project
 
 Countdown-to-reunion apps for long-distance couples are a real, small
-niche (see: Timestamp, Tondr, Lasting) — this is my own take on it, built
+niche (see: Timestamp, Tondr, Lasting). This is my own take on it, built
 as both a genuine tool for personal use and an exercise in working through
 a full mobile app design under a real constraint: it had to cost **exactly
 $0** to build and run, indefinitely, with no exceptions. That single
 constraint ended up shaping almost every architectural decision in the
-project — see [Notable engineering decisions](#notable-engineering-decisions)
+project. See [Notable engineering decisions](#notable-engineering-decisions)
 below.
 
 ## Features
@@ -142,7 +142,7 @@ app":
 
 - **A hard $0 cost constraint, taken literally.** Both the iCloud/CloudKit
   capability and the Push Notifications entitlement turned out to require
-  Apple's paid $99/year Developer Program — a fact that broke the original
+  Apple's paid $99/year Developer Program: a fact that broke the original
   CloudKit-based architecture partway through design. Rather than quietly
   paying for it, the whole sync model was redesigned around Firebase's free
   tier and **no push notifications at all**, with an honest, explicit
@@ -175,7 +175,7 @@ app":
   vague.** Where a question couldn't be answered by design alone (e.g.
   whether a given entitlement provisions cleanly under free-tier signing),
   the plan specifies the exact test, both possible outcomes, and the
-  pre-committed action for each — so implementation never stalls waiting
+  pre-committed action for each, so implementation never stalls waiting
   on a judgment call.
 
 ## Tech stack
@@ -200,14 +200,14 @@ app":
 
 ## Documentation
 
-The full design document — architecture, data model, security rules,
+The full design document (architecture, data model, security rules,
 pairing flow, sync strategy, open questions, and rationale for every major
-decision — lives in [`DESIGN.md`](DESIGN.md).
+decision) lives in [`DESIGN.md`](DESIGN.md).
 
 ## License
 
 All rights reserved. This repository is public for portfolio/viewing
-purposes only — no permission is granted to use, copy, modify, or
+purposes only. No permission is granted to use, copy, modify, or
 distribute this code or any part of this project. See
 [`LICENSE`](LICENSE) for the full notice.
 

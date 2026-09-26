@@ -1,4 +1,4 @@
-// CoupleCountdownKitTests.swift — unit tests for the pure-Foundation logic in this package.
+// CoupleCountdownKitTests.swift: unit tests for the pure-Foundation logic in this package.
 
 import XCTest
 @testable import CoupleCountdownKit
@@ -307,7 +307,7 @@ final class MilestoneCheckerTests: XCTestCase {
 final class AppGroupCacheTests: XCTestCase {
     func testWriteThenReadRoundTrips() {
         // A suite name with no real App Group entitlement still works for
-        // UserDefaults(suiteName:) in a unit-test/CLI context — it just
+        // UserDefaults(suiteName:) in a unit-test/CLI context: it just
         // isn't actually shared with another process, which is fine here.
         let cache = AppGroupCache(suiteName: "group.test.couplecountdown")
         let state = RelationshipState(

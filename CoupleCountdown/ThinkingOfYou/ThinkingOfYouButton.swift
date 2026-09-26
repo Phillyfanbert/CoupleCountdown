@@ -1,4 +1,4 @@
-// ThinkingOfYouButton.swift — one-tap "thinking of you" nudge (DESIGN.md §7.1)
+// ThinkingOfYouButton.swift: one-tap "thinking of you" nudge (DESIGN.md §7.1)
 
 import SwiftUI
 import CoupleCountdownKit
@@ -31,7 +31,7 @@ struct ThinkingOfYouButton: View {
             .accessibilityIdentifier("thinkingOfYouButton")
 
             if didFail {
-                Text("Couldn't send — try again").font(.caption).foregroundStyle(.red)
+                Text("Couldn't send. Try again").font(.caption).foregroundStyle(.red)
             }
         }
     }
@@ -41,11 +41,11 @@ struct ThinkingOfYouButton: View {
         isSending = true
         didFail = false
         do {
-            // Not an instant push (DESIGN.md §2, §5.4) — this only
+            // Not an instant push (DESIGN.md §2, §5.4): this only
             // surfaces to the partner next time their app or widget
             // refreshes.
             try await firestore.sendPing(coupleId: coupleId, uid: uid)
-            // Only show "Sent" if the write actually succeeded —
+            // Only show "Sent" if the write actually succeeded:
             // previously this fired unconditionally, so a failed send
             // looked identical to a successful one.
             didSend = true

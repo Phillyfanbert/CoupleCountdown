@@ -1,5 +1,5 @@
 // Public web-app identifiers for the couplecountdown-7715c Firebase project.
-// Not secrets — same category as the committed iOS GoogleService-Info.plist.
+// Not secrets, same category as the committed iOS GoogleService-Info.plist.
 // Access control comes entirely from firebase/firestore.rules, not from
 // hiding these values.
 export const firebaseConfig = {

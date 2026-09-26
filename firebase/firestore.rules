@@ -24,15 +24,15 @@ service cloud.firestore {
         (request.auth.uid in resource.data.participantUIDs ||
          resource.data.participantUIDs.size() < 2);
 
-      // No `list` is ever granted on this collection — codes can only
+      // No `list` is ever granted on this collection: codes can only
       // be looked up by exact ID, never browsed/enumerated.
 
       allow create: if request.auth != null &&
         request.resource.data.participantUIDs == [request.auth.uid];
 
       allow update: if request.auth != null && (
-        // Existing participant editing anything EXCEPT participantUIDs
-        // — membership can never be changed by a normal edit, only by
+        // Existing participant editing anything EXCEPT participantUIDs:
+        // membership can never be changed by a normal edit, only by
         // the join path below.
         (request.auth.uid in resource.data.participantUIDs &&
          !request.resource.data.diff(resource.data).affectedKeys()
@@ -46,7 +46,7 @@ service cloud.firestore {
         ||
         // Joining: append self only, only while a slot is open, only
         // that one field changes, and never into a pairing its creator
-        // cancelled (e.g. after both partners tapped Create) — otherwise an
+        // cancelled (e.g. after both partners tapped Create), otherwise an
         // old code would still pair you with someone who has moved on.
         (resource.data.participantUIDs.size() < 2 &&
          resource.data.get('closed', false) != true &&
@@ -62,7 +62,7 @@ service cloud.firestore {
       // Deliberately NOT `{sub=**}` (recursive wildcard): that can match
       // *zero* additional segments in Firestore Rules, meaning it also
       // matched the couples/{coupleId} document itself and silently
-      // granted any participant unrestricted write access there —
+      // granted any participant unrestricted write access there:
       // completely bypassing the tamper guard in `allow update` above.
       // Found by the emulator test suite, not by inspection. Subcollections
       // (events, importantDates, pings) are all exactly one level deep, so

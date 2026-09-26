@@ -1,4 +1,4 @@
-// CountdownWidgetView.swift — rendered widget content, including first-run/no-date empty states (DESIGN.md §6)
+// CountdownWidgetView.swift: rendered widget content, including first-run/no-date empty states (DESIGN.md §6)
 
 import SwiftUI
 import WidgetKit
@@ -68,7 +68,7 @@ struct CountdownWidgetView: View {
     private var countdown: some View {
         if let state = entry.state {
             // Same states as the app's countdown card: a timer only makes
-            // sense while apart with the meetup still ahead — it used to
+            // sense while apart with the meetup still ahead: it used to
             // tick against the old date while together, too.
             if state.status == .together {
                 Text("Together 💞")
@@ -77,7 +77,7 @@ struct CountdownWidgetView: View {
                       let day = CountdownFormatter.widgetDay(until: nextMeetupDate, from: entry.date) {
                 countdownText(days: day.days, timer: entry.date...day.dayEnds)
             } else if state.nextMeetupDate != nil {
-                // Countdown's done: ask, don't celebrate — the app celebrates
+                // Countdown's done: ask, don't celebrate: the app celebrates
                 // once someone says yes. Tapping opens the app to answer.
                 Text(family == .accessoryInline ? "⏰ Have you met up?" : "⏰ Have you met up? 💞")
                     .font(.system(.headline, design: .rounded))
@@ -90,7 +90,7 @@ struct CountdownWidgetView: View {
             }
         } else {
             // First-run empty state: no coupleId/cache yet (§6).
-            Text("Not paired yet — open the app")
+            Text("Not paired yet. Open the app")
                 .font(.caption)
         }
     }

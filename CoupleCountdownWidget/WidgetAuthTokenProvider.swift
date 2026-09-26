@@ -1,13 +1,13 @@
-// WidgetAuthTokenProvider.swift — mints a short-lived ID token from the Keychain-shared refresh token (DESIGN.md §5.5)
+// WidgetAuthTokenProvider.swift: mints a short-lived ID token from the Keychain-shared refresh token (DESIGN.md §5.5)
 
 import Foundation
 import CoupleCountdownKit
 
 /// Mints a fresh Firebase ID token from the signed-in account's refresh
-/// token the app persisted into the shared Keychain (§5.5) — plain REST against
+/// token the app persisted into the shared Keychain (§5.5): plain REST against
 /// Google's token endpoint, no Firebase Auth SDK bundled into the widget
 /// extension.
-/// A minted ID token, and whose it is — the widget needs the uid to tell
+/// A minted ID token, and whose it is: the widget needs the uid to tell
 /// the partner's "thinking of you" pings from this person's own.
 struct WidgetSession {
     let idToken: String
@@ -16,7 +16,7 @@ struct WidgetSession {
 
 struct WidgetAuthTokenProvider {
     private let keychain: KeychainStore
-    /// Firebase Web API key — public, identifies the Firebase project
+    /// Firebase Web API key: public, identifies the Firebase project
     /// rather than authenticating anything by itself, so it's safe to
     /// embed.
     private let apiKey: String
@@ -26,7 +26,7 @@ struct WidgetAuthTokenProvider {
         self.apiKey = apiKey
     }
 
-    /// Never throws — returns nil on any failure (missing token, no
+    /// Never throws: returns nil on any failure (missing token, no
     /// network, bad response), and WidgetFirestoreClient treats a nil
     /// token as "fall back to the App Group cache" per §5.5's
     /// failure-mode behavior.

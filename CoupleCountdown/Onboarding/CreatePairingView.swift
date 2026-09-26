@@ -1,4 +1,4 @@
-// CreatePairingView.swift — generates and displays the join code + QR (DESIGN.md §5.3 point 3)
+// CreatePairingView.swift: generates and displays the join code + QR (DESIGN.md §5.3 point 3)
 
 import SwiftUI
 import UIKit
@@ -66,7 +66,7 @@ struct CreatePairingView: View {
                     // The account records the pairing as soon as it's created
                     // (so the user's other devices pick it up), but this screen
                     // only gives way to the countdown when the user taps
-                    // Continue — advancing automatically once left ~0 real time
+                    // Continue: advancing automatically once left ~0 real time
                     // to read/copy/share the code before it vanished (caught by
                     // XCUITest). The countdown's "waiting for your partner" card
                     // shows the code again afterwards.
@@ -106,7 +106,7 @@ struct CreatePairingView: View {
 
     private func createPairing() async {
         guard let uid = authService.uid else {
-            errorMessage = "Not signed in yet — try again in a moment."
+            errorMessage = "Not signed in yet. Try again in a moment."
             return
         }
         isCreating = true
@@ -124,7 +124,7 @@ struct CreatePairingView: View {
             generatedCode = code
         } catch {
             holdingNewCode = false
-            errorMessage = "Couldn't create the pairing — check your connection and try again."
+            errorMessage = "Couldn't create the pairing. Check your connection and try again."
         }
         isCreating = false
     }

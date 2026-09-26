@@ -1,4 +1,4 @@
-// JoinPairingView.swift — code entry screen for the joining partner (DESIGN.md §5.3 point 4)
+// JoinPairingView.swift: code entry screen for the joining partner (DESIGN.md §5.3 point 4)
 
 import SwiftUI
 
@@ -67,7 +67,7 @@ struct JoinPairingView: View {
 
     private func join() async {
         guard let uid = authService.uid else {
-            errorMessage = "Not signed in yet — try again in a moment."
+            errorMessage = "Not signed in yet. Try again in a moment."
             return
         }
         let code = enteredCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -83,10 +83,10 @@ struct JoinPairingView: View {
             // Joining also records the pairing on the account; the account
             // listener (AccountSessionView) moves every device to the countdown.
         } catch {
-            // Deliberately generic — a wrong, expired, already-full, or
+            // Deliberately generic: a wrong, expired, already-full, or
             // cancelled code all fail the Security Rules the same way
             // (permission denied).
-            errorMessage = "Couldn't join — check the code and try again."
+            errorMessage = "Couldn't join. Check the code and try again."
         }
         isJoining = false
     }

@@ -1,10 +1,10 @@
-// OnboardingView.swift — Create/Join entry screen for a signed-in account without a pairing (DESIGN.md §5.3 point 2)
+// OnboardingView.swift: Create/Join entry screen for a signed-in account without a pairing (DESIGN.md §5.3 point 2)
 
 import SwiftUI
 
 struct OnboardingView: View {
     let uid: String
-    /// The account's display name — set at sign-up, so the name step only
+    /// The account's display name: set at sign-up, so the name step only
     /// appears for an account that somehow has none.
     let profileName: String?
     @Binding var holdingNewCode: Bool
@@ -63,7 +63,7 @@ struct OnboardingView: View {
             // new name up and re-renders this view past the name step.
             try await firestore.saveProfile(uid: uid, displayName: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
-            nameError = "Couldn't save — check your connection and try again."
+            nameError = "Couldn't save. Check your connection and try again."
         }
     }
 
@@ -74,14 +74,14 @@ struct OnboardingView: View {
                     .font(.system(size: 56))
                     .foregroundStyle(CoupleTheme.blush.accentColor)
 
-                Text("Hi \(displayName) — let's get you two set up")
+                Text("Hi \(displayName), let's get you two set up")
                     .font(.system(.title2, design: .rounded, weight: .semibold))
                     .multilineTextAlignment(.center)
 
                 // Heads off the obvious failure mode (DESIGN.md §5.3 point 2).
                 // If both partners do tap Create anyway, either can cancel theirs
                 // from the countdown screen's "waiting for your partner" card.
-                Text("Only one of you should tap Create — have your partner tap Join with the code you'll get next. Already paired? Sign in with that account instead.")
+                Text("Only one of you should tap Create. Have your partner tap Join with the code you'll get next. Already paired? Sign in with that account instead.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

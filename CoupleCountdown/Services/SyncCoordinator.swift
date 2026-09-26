@@ -1,4 +1,4 @@
-// SyncCoordinator.swift — the sync pipeline convention: cache write + widget reload on every fresh state (DESIGN.md §5.2)
+// SyncCoordinator.swift: the sync pipeline convention: cache write + widget reload on every fresh state (DESIGN.md §5.2)
 
 import Foundation
 import WidgetKit
@@ -6,8 +6,8 @@ import FirebaseFirestore
 import CoupleCountdownKit
 
 /// Implements the "sync pipeline convention" from DESIGN.md §5.2: any
-/// time fresh RelationshipState arrives — from the realtime listener, a
-/// one-shot fetch, or a local write this device just made itself — it
+/// time fresh RelationshipState arrives, from the realtime listener, a
+/// one-shot fetch, or a local write this device just made itself: it
 /// gets written to the App Group cache and the widget's timeline gets
 /// reloaded. This is what makes the *acting* partner's own widget update
 /// instantly, independent of the latency table in §5.4.
@@ -52,7 +52,7 @@ final class SyncCoordinator: ObservableObject {
     }
 
     /// Mechanism #1 (§5.2): attach while the app is foregrounded, detach
-    /// on background — call sites are the app's scenePhase observer.
+    /// on background: call sites are the app's scenePhase observer.
     func startListening() {
         stopListening()
         listener = firestore.listenToCouple(coupleId: coupleId, onChange: { [weak self] state in
@@ -73,13 +73,13 @@ final class SyncCoordinator: ObservableObject {
     }
 
     /// Call right after a local write this device just made (status
-    /// toggle, date change) succeeds, with the resulting state — this is
+    /// toggle, date change) succeeds, with the resulting state: this is
     /// what actually makes the acting partner's own widget update
     /// instantly per §5.2's sync pipeline convention. No network
     /// round-trip: `lastUpdatedAt` here is the local clock, not the
     /// server-resolved timestamp; the exact value arrives shortly after
     /// via the listener/next fetch and harmlessly overwrites this.
-    /// Previously missing entirely — writes only reached the local
+    /// Previously missing entirely: writes only reached the local
     /// widget by waiting for the listener to echo them back, which is
     /// exactly the network round-trip §5.2 says shouldn't be needed.
     func applyLocalWrite(_ state: RelationshipState) {

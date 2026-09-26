@@ -1,4 +1,4 @@
-// CalendarScreen.swift — planned visits and important dates, on a month grid and as a countdown list
+// CalendarScreen.swift: planned visits and important dates, on a month grid and as a countdown list
 
 import SwiftUI
 import CoupleCountdownKit
@@ -68,7 +68,7 @@ struct CalendarScreen: View {
         return (visitItems + dateItems).sorted { $0.when < $1.when }
     }
 
-    /// Past visits and past one-off dates, most recent first — kept out of
+    /// Past visits and past one-off dates, most recent first: kept out of
     /// the way below what's coming up.
     private var past: [Item] {
         let now = Date()
@@ -83,7 +83,7 @@ struct CalendarScreen: View {
         Set(visits.map { calendar.startOfDay(for: $0.start) })
     }
 
-    /// Important dates on the displayed month — yearly ones on their day in
+    /// Important dates on the displayed month: yearly ones on their day in
     /// that month's year, one-off ones only in their own year.
     private var importantDays: Set<Date> {
         let year = calendar.component(.year, from: displayedMonth)
@@ -163,7 +163,7 @@ struct CalendarScreen: View {
 
             Section("Coming up") {
                 if hasLoaded && upcoming.isEmpty {
-                    Text("Nothing yet — plan your next visit, or add your anniversary.")
+                    Text("Nothing yet. Plan your next visit, or add your anniversary.")
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("nothingComingUpText")
                 }
@@ -269,7 +269,7 @@ struct CalendarScreen: View {
             dates = try await fetchedDates
             errorMessage = nil
         } catch {
-            errorMessage = "Couldn't load — pull to refresh or try again."
+            errorMessage = "Couldn't load. Pull to refresh or try again."
         }
         hasLoaded = true
     }
@@ -290,7 +290,7 @@ struct CalendarScreen: View {
             try await followPlan(removed: nil)
             isShowingPlanVisit = false
         } catch {
-            visitError = "Couldn't save the visit — check your connection and try again."
+            visitError = "Couldn't save the visit. Check your connection and try again."
         }
     }
 
@@ -300,7 +300,7 @@ struct CalendarScreen: View {
             visits.removeAll { $0.id == visit.id }
             try await followPlan(removed: visit)
         } catch {
-            errorMessage = "Couldn't delete — check your connection and try again."
+            errorMessage = "Couldn't delete. Check your connection and try again."
         }
     }
 
@@ -309,7 +309,7 @@ struct CalendarScreen: View {
             try await firestore.deleteImportantDate(id: date.id, coupleId: coupleId)
             dates.removeAll { $0.id == date.id }
         } catch {
-            errorMessage = "Couldn't delete — check your connection and try again."
+            errorMessage = "Couldn't delete. Check your connection and try again."
         }
     }
 

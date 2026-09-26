@@ -1,4 +1,4 @@
-// data.js — every Firestore read/write the web client makes, mirroring
+// data.js: every Firestore read/write the web client makes, mirroring
 // CoupleCountdown/Services/FirestoreService.swift field-for-field so the web
 // app and the iPhone app can share one couple document. A person's pairing and
 // name live on their account (users/{uid}), not the device, so every device
@@ -25,7 +25,7 @@ import {
 } from "firebase/firestore";
 import { dayFromStored, normalizedStart, PING_LIFETIME_MS, storedFromLocalDay } from "./logic.js";
 
-// Same alphabet as JoinCodeGenerator.swift — no 0/O/1/I.
+// Same alphabet as JoinCodeGenerator.swift, no 0/O/1/I.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export function generateJoinCode(length = 6) {
@@ -47,7 +47,7 @@ export function makeApi(db, uid) {
 
     userRef,
 
-    /** Name (and pairing, when known) on the account — merge, never clobber. */
+    /** Name (and pairing, when known) on the account: merge, never clobber. */
     async saveProfile(fields) {
       await setDoc(userRef(), fields, { merge: true });
     },
@@ -82,7 +82,7 @@ export function makeApi(db, uid) {
      * The account record goes in the *first* batch, with the join itself (a
      * different document, so the join rule still holds). It used to be in the
      * second: if that failed, the joiner was in the pairing but their account
-     * never knew, and retrying Join was refused (already a participant) — stuck
+     * never knew, and retrying Join was refused (already a participant): stuck
      * for good. Now a failed second write only leaves the name missing, which
      * ensurePartnerProfile fills in the next time the countdown loads.
      */
@@ -123,7 +123,7 @@ export function makeApi(db, uid) {
     /**
      * Status change + history event in one batch so they can never disagree
      * (§8). The listener shows it at once; the returned promise settles when
-     * the server has it — callers shouldn't wait on it to move on, or offline
+     * the server has it: callers shouldn't wait on it to move on, or offline
      * nothing happens until the connection is back. `moveVisit` ({ id, start })
      * also moves a visit that's happening early, in the same write.
      */
@@ -210,7 +210,7 @@ export function makeApi(db, uid) {
           return {
             id: d.id,
             label: data.label,
-            // Local midnight of the stored *day* — read with UTC components,
+            // Local midnight of the stored *day*: read with UTC components,
             // not as an instant (see storedFromLocalDay).
             date: dayFromStored(data.date.toDate()),
             repeatsAnnually: data.repeatsAnnually === true,
@@ -230,7 +230,7 @@ export function makeApi(db, uid) {
 
     /**
      * Both partners' pings from the last few days, live; unseenPings (logic.js)
-     * picks out the ones to show. Filtered by time only — one field, so no
+     * picks out the ones to show. Filtered by time only: one field, so no
      * composite index. Returns the unsubscribe function.
      */
     watchRecentPings(coupleId, onChange, onError) {

@@ -1,14 +1,14 @@
-// FirestoreService.swift — all Firestore SDK reads/writes; app-target only, never the widget (DESIGN.md §5.6)
+// FirestoreService.swift: all Firestore SDK reads/writes; app-target only, never the widget (DESIGN.md §5.6)
 
 import Foundation
 import FirebaseFirestore
 import CoupleCountdownKit
 
-/// Every Firestore SDK call in the app lives here (DESIGN.md §5.6) — the
+/// Every Firestore SDK call in the app lives here (DESIGN.md §5.6): the
 /// widget target never imports FirebaseFirestore at all; it only does its
 /// own lightweight REST fetch (WidgetFirestoreClient, §5.5).
 ///
-/// UNVERIFIED — written without Xcode available to compile against (see
+/// UNVERIFIED: written without Xcode available to compile against (see
 /// DESIGN.md v0.3). Method names/signatures for FirebaseFirestore's
 /// Codable support (`data(as:)`, `setData(from:)`) are believed correct
 /// for the modern SDK but not compiled.
@@ -49,7 +49,7 @@ final class FirestoreService {
     /// Watches the account record. Delivers only server-confirmed state:
     /// Firestore reports this device's own writes immediately, before the
     /// server has them, and acting on that after "Create" would open the new
-    /// pairing before the server had stored it — the rules deny reading a
+    /// pairing before the server had stored it: the rules deny reading a
     /// pairing that doesn't exist yet, and a denied listener never recovers.
     /// (Found in the web client, which shares these rules.)
     func listenToProfile(
@@ -75,7 +75,7 @@ final class FirestoreService {
     // MARK: - Pairing (§5.3)
 
     /// Creates a new couple doc with the caller as the sole participant, and
-    /// records it on the caller's account in the same batch — so a pairing can
+    /// records it on the caller's account in the same batch, so a pairing can
     /// never exist without the account knowing about it.
     func createCouple(coupleId: String, uid: String, displayName: String, timeZoneIdentifier: String) async throws {
         let state = RelationshipState(
@@ -105,7 +105,7 @@ final class FirestoreService {
     /// The account record is written in the *first* batch, alongside the
     /// join itself (a different document, so the join rule still holds).
     /// It used to be in the second: if that one failed, the joiner was in
-    /// the pairing but their account never knew — and retrying Join was
+    /// the pairing but their account never knew, and retrying Join was
     /// refused because they were already a participant, so they were stuck
     /// for good. Now the second write only adds the name/time zone; if it
     /// fails, `ensurePartnerProfile` fills the profile in the next time the
@@ -163,9 +163,9 @@ final class FirestoreService {
 
     /// Mechanism #1: realtime listener while the app is foregrounded.
     /// Caller owns the returned registration's lifetime and must call
-    /// `.remove()` — SyncCoordinator attaches/detaches this around
+    /// `.remove()`: SyncCoordinator attaches/detaches this around
     /// scenePhase changes.
-    /// Errors go to `onError` — they used to be dropped, and a pairing this
+    /// Errors go to `onError`: they used to be dropped, and a pairing this
     /// account couldn't read left the countdown on "Loading…" for good.
     func listenToCouple(
         coupleId: String,
@@ -178,7 +178,7 @@ final class FirestoreService {
                 return
             }
             // .estimate, so this device's own change shows the moment it's
-            // made — even offline, still queued for the server. Pending
+            // made, even offline, still queued for the server. Pending
             // snapshots used to fail to decode and were dropped, so an offline
             // "Yes, we're together!" changed nothing on screen.
             guard let snapshot,
@@ -191,7 +191,7 @@ final class FirestoreService {
     // MARK: - Status toggle (§8)
 
     /// Batched so the status change and its history-log entry can never
-    /// disagree (DESIGN.md §8 "Write atomicity") — a dropped connection
+    /// disagree (DESIGN.md §8 "Write atomicity"): a dropped connection
     /// between two separate writes could otherwise leave them
     /// inconsistent.
     ///
@@ -201,7 +201,7 @@ final class FirestoreService {
     /// Waiting used to leave "Yes, we're together!" doing nothing visible
     /// until then. `onFailure` hears if the server rejects it.
     ///
-    /// `movingVisit` also moves a visit's start in the same write — used when
+    /// `movingVisit` also moves a visit's start in the same write, used when
     /// a couple meets before the planned time (MeetupPlanner.visitMetEarly).
     func setStatus(
         _ status: RelationshipState.Status,
@@ -250,7 +250,7 @@ final class FirestoreService {
     }
 
     /// Sets (or, with nil, clears) the meetup the main countdown and the
-    /// widget count down to, without changing the apart/together status —
+    /// widget count down to, without changing the apart/together status:
     /// used when visits are planned or removed.
     func setNextMeetupDate(_ date: Date?, coupleId: String, uid: String) async throws {
         try await coupleRef(coupleId).updateData([
@@ -324,7 +324,7 @@ final class FirestoreService {
 
     func sendPing(coupleId: String, uid: String) async throws {
         // expiresAt is computed client-side (server timestamp isn't known
-        // until the write resolves) — fine, since a few seconds of clock
+        // until the write resolves): fine, since a few seconds of clock
         // skew is irrelevant against a multi-day TTL window.
         try await coupleRef(coupleId).collection("pings").addDocument(data: [
             "sentBy": uid,
@@ -335,7 +335,7 @@ final class FirestoreService {
 
     /// Both partners' pings from the last `ThinkingOfYouPing.lifetime`,
     /// live; `ThinkingOfYouPing.unseen` picks out the ones to show. Filtered
-    /// by time only (one field, so no composite index needed) — it's a
+    /// by time only (one field, so no composite index needed): it's a
     /// handful of documents.
     func listenToRecentPings(
         coupleId: String,

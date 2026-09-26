@@ -1,4 +1,4 @@
-// AuthService.swift — email + password accounts + refresh-token persistence to Keychain (DESIGN.md §5.3, §5.5)
+// AuthService.swift: email + password accounts + refresh-token persistence to Keychain (DESIGN.md §5.3, §5.5)
 
 import Foundation
 import FirebaseAuth
@@ -6,7 +6,7 @@ import CoupleCountdownKit
 
 /// Identity is an email + password account, so one person can be signed in on
 /// several devices at once (iPhone app, and the web client on a computer) and
-/// every one of them sees the same pairing — which lives on the account in
+/// every one of them sees the same pairing, which lives on the account in
 /// `users/{uid}`, not on the device.
 ///
 /// Also mirrors the refresh token into the shared Keychain so the widget
@@ -21,7 +21,7 @@ final class AuthService: ObservableObject {
     @Published private(set) var email: String?
 
     /// True while a new account's profile (name, carried-over pairing) is
-    /// still being written — the app waits on it so the brand-new account
+    /// still being written: the app waits on it so the brand-new account
     /// doesn't flash the "what's your name?" step it's about to skip.
     @Published private(set) var isFinishingSignUp = false
     /// Shown next to the Sign out buttons when signing out didn't work.
@@ -38,7 +38,7 @@ final class AuthService: ObservableObject {
         }
     }
 
-    /// An anonymous identity from before accounts is still signed in here —
+    /// An anonymous identity from before accounts is still signed in here:
     /// creating an account will upgrade it in place (same uid).
     var hasLegacyAnonymousSession: Bool {
         Auth.auth().currentUser?.isAnonymous == true
@@ -79,7 +79,7 @@ final class AuthService: ObservableObject {
     }
 
     /// Signs out and forgets the widget's token. If Firebase couldn't sign
-    /// out, this stays signed in and says so — it used to show the sign-in
+    /// out, this stays signed in and says so: it used to show the sign-in
     /// screen regardless (and delete the widget's token), and the account
     /// quietly came back on the next launch.
     func signOut() {
@@ -87,7 +87,7 @@ final class AuthService: ObservableObject {
             try Auth.auth().signOut()
         } catch {
             print("AuthService.signOut() failed: \(error)")
-            signOutError = "Couldn't sign out — try again."
+            signOutError = "Couldn't sign out. Try again."
             return
         }
         signOutError = nil
@@ -124,7 +124,7 @@ final class AuthService: ObservableObject {
             // A silent failure here would mean the widget can never
             // authenticate independently, with no way to tell why (§5.5's
             // Keychain Sharing risk, §10).
-            print("KeychainStore.write() failed to persist the refresh token — the widget will not be able to authenticate independently.")
+            print("KeychainStore.write() failed to persist the refresh token; the widget will not be able to authenticate independently.")
         }
     }
 
@@ -134,23 +134,23 @@ final class AuthService: ObservableObject {
         guard nsError.domain == AuthErrors.domain,
               let code = AuthErrorCode(rawValue: nsError.code)
         else {
-            return "Couldn't sign in — try again."
+            return "Couldn't sign in. Try again."
         }
         switch code {
         case .wrongPassword, .userNotFound, .invalidCredential:
             return "Email or password is incorrect."
         case .emailAlreadyInUse, .credentialAlreadyInUse:
-            return "There's already an account with that email — sign in instead."
+            return "There's already an account with that email. Sign in instead."
         case .invalidEmail:
             return "That doesn't look like an email address."
         case .weakPassword:
             return "Use at least 6 characters for your password."
         case .tooManyRequests:
-            return "Too many attempts — wait a minute and try again."
+            return "Too many attempts. Wait a minute and try again."
         case .networkError:
-            return "Can't reach the server — check your connection and try again."
+            return "Can't reach the server. Check your connection and try again."
         default:
-            return "Couldn't sign in — try again."
+            return "Couldn't sign in. Try again."
         }
     }
 }

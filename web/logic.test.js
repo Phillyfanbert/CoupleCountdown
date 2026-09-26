@@ -1,6 +1,6 @@
 // Mirrors CoupleCountdownKitTests.swift so the web port can't drift from the
 // iPhone app's behavior. Run: node --test web/logic.test.js
-// Run under several time zones in CI (TZ=...) — the calendar-day tests are
+// Run under several time zones in CI (TZ=...): the calendar-day tests are
 // exactly about behaving the same everywhere.
 import test from "node:test";
 import assert from "node:assert/strict";

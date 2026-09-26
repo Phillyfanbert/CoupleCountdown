@@ -1,11 +1,11 @@
-// StatsView.swift — time together and apart, and each stretch apart (DESIGN.md §7.2)
+// StatsView.swift: time together and apart, and each stretch apart (DESIGN.md §7.2)
 
 import SwiftUI
 import CoupleCountdownKit
 
 struct StatsView: View {
     let coupleId: String
-    /// When the pairing began — the start of the first stretch apart.
+    /// When the pairing began: the start of the first stretch apart.
     let pairedAt: Date?
 
     @State private var stats: CumulativeStats?
@@ -92,7 +92,7 @@ struct StatsView: View {
 
     private func loadStats() async {
         do {
-            // Derived, not stored (§7.2) — walks the full event log
+            // Derived, not stored (§7.2): walks the full event log
             // client-side rather than reading a precomputed value.
             let events = try await firestore.fetchEvents(coupleId: coupleId)
             stats = CumulativeStatsCalculator.calculate(events: events, pairedAt: pairedAt)

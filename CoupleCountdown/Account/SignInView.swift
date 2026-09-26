@@ -1,9 +1,9 @@
-// SignInView.swift — create an account or sign in (email + password)
+// SignInView.swift: create an account or sign in (email + password)
 
 import SwiftUI
 import CoupleCountdownKit
 
-/// One account works on every device — the iPhone app and the web client —
+/// One account works on every device: the iPhone app and the web client:
 /// and they all show the same pairing.
 struct SignInView: View {
     @EnvironmentObject private var authService: AuthService
@@ -32,13 +32,13 @@ struct SignInView: View {
     private var introText: String {
         switch (mode, hasLegacyPairing) {
         case (.createAccount, true):
-            return "Create an account to keep the pairing on this iPhone — then sign in with it on your computer too."
+            return "Create an account to keep the pairing on this iPhone, then sign in with it on your computer too."
         case (.signIn, true):
             // Signing in replaces the old identity, and a pairing's members
-            // can't be changed afterwards — so that pairing would be lost.
-            return "This iPhone has a pairing from before accounts. Signing in to an existing account leaves it behind for good — create an account instead to keep it."
+            // can't be changed afterwards, so that pairing would be lost.
+            return "This iPhone has a pairing from before accounts. Signing in to an existing account leaves it behind for good. Create an account instead to keep it."
         default:
-            return "Use the same account in this app and on the web — you'll see the same countdown on your phone and your computer."
+            return "Use the same account in this app and on the web to see the same countdown on your phone and your computer."
         }
     }
 
@@ -162,7 +162,7 @@ struct SignInView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         // Put the keyboard away now, while the request runs. Left up, it was
         // still covering the lower half of the next screen (onboarding's
-        // Create/Join buttons) when that screen appeared — caught by the UI
+        // Create/Join buttons) when that screen appeared: caught by the UI
         // tests, whose taps landed on nothing.
         focusedField = nil
         isWorking = true

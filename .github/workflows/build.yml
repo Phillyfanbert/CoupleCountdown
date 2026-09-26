@@ -54,11 +54,11 @@ jobs:
         run: |
           # Not CODE_SIGNING_ALLOWED=NO (fully unsigned): that build has
           # zero entitlements at all, which breaks even basic Keychain
-          # access — confirmed via a real run, where Firebase Auth's
+          # access, confirmed via a real run, where Firebase Auth's
           # internal session-persistence write failed with
           # "SecItemAdd (-34018) A required entitlement isn't present."
           # CODE_SIGN_IDENTITY=- is ad-hoc local signing ("Sign to Run
-          # Locally" in Xcode's UI) — Simulator accepts it without any
+          # Locally" in Xcode's UI): Simulator accepts it without any
           # real Apple Developer account, and it's enough to get a valid
           # entitlements set embedded.
           xcodebuild build \
@@ -75,7 +75,7 @@ jobs:
           xcrun simctl boot "${{ steps.sim.outputs.udid }}"
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
           # One run took ~100s to boot (first-time account/keyboard/video
-          # data migrations) — bootstatus already waits for "Finished",
+          # data migrations): bootstatus already waits for "Finished",
           # but a small buffer here guards against installing/launching
           # into a simulator that reports booted a moment before it's
           # actually ready.
@@ -86,7 +86,7 @@ jobs:
           xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP_PATH"
 
           mkdir -p logs
-          # `log stream` is a supplementary diagnostic only — it does NOT
+          # `log stream` is a supplementary diagnostic only: it does NOT
           # gate pass/fail. Previously `simctl launch --console-pty` was
           # relied on for both the stream AND the launch confirmation,
           # and one run killed it via timeout before it ever printed
@@ -99,7 +99,7 @@ jobs:
           LOG_PID=$!
           sleep 2
 
-          # Plain (non-console) launch — this is what every prior
+          # Plain (non-console) launch: this is what every prior
           # successful run's confirmation line actually came from. Not
           # backgrounded and not `|| true`: GitHub Actions runs with
           # `set -e`, so a real launch failure now fails this step
@@ -131,7 +131,7 @@ jobs:
           # default GitHub Actions bash shell does NOT enable it, so
           # `xcodebuild test | tee ...` silently reported this step as
           # green while xcodebuild had actually failed at codesigning
-          # before running a single test — a real false-pass, not a
+          # before running a single test: a real false-pass, not a
           # hypothetical one.
           set -o pipefail
           mkdir -p logs
@@ -150,7 +150,7 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             | tee logs/uitest-output.log
           # xcodebuild also exits 0 when *no* tests run (say, the test
-          # target dropped out of the scheme) — another way to go green
+          # target dropped out of the scheme): another way to go green
           # having tested nothing. Require that tests really ran and passed.
           grep -Eq "Executed [1-9][0-9]* tests?, with 0 failures" logs/uitest-output.log \
             || { echo "::error::No UI tests ran"; exit 1; }
@@ -174,7 +174,7 @@ jobs:
   build-device-ipa:
     name: Build unsigned .ipa for real-device sideloading (SideStore/AltStore)
     runs-on: macos-latest
-    # Only for pushes to main / manual runs — never for PRs, so an
+    # Only for pushes to main / manual runs, never for PRs, so an
     # untrusted/in-progress branch can't publish over the release a real
     # device might be about to install from.
     if: github.event_name != 'pull_request'
@@ -200,7 +200,7 @@ jobs:
           # Deliberately unsigned, not ad-hoc: SideStore/AltStore strip
           # whatever signature is present and re-sign the whole app with
           # the user's own free Apple ID at install time, so there's
-          # nothing for a CI-applied signature to accomplish here — this
+          # nothing for a CI-applied signature to accomplish here: this
           # is the standard, well-established shape for an IPA meant to
           # be sideloaded rather than distributed through the App Store.
           # (Simulator builds elsewhere in this workflow need ad-hoc
@@ -240,7 +240,7 @@ jobs:
           gh release create latest \
             CoupleCountdown.ipa source.json \
             --title "Latest build ($(git rev-parse --short HEAD))" \
-            --notes "Automatically built from the latest push to main. Unsigned — install via SideStore or AltStore, which re-sign it with your own free Apple ID at install time." \
+            --notes "Automatically built from the latest push to main. Unsigned. Install via SideStore or AltStore, which re-sign it with your own free Apple ID at install time." \
             --latest
 
   test-kit-package:
@@ -254,7 +254,7 @@ jobs:
         run: |
           set -o pipefail
           swift test 2>&1 | tee ../swift-test.log
-          # Exits 0 when no tests run, too — require that they did.
+          # Exits 0 when no tests run, too: require that they did.
           grep -Eq "Executed [1-9][0-9]* tests?, with 0 failures" ../swift-test.log \
             || { echo "::error::No Kit tests ran"; exit 1; }
 
@@ -268,7 +268,7 @@ jobs:
         with:
           node-version: "20"
 
-      # Pure-function ports of the Swift stats/date logic (web/logic.js) —
+      # Pure-function ports of the Swift stats/date logic (web/logic.js):
       # mirrors CoupleCountdownKitTests so the web client can't drift from
       # the iPhone app's behavior. Run in several time zones: the calendar-
       # day bug (dates a day early for a partner further west) only shows
@@ -279,7 +279,7 @@ jobs:
           for tz in UTC America/Los_Angeles America/New_York Asia/Tokyo Pacific/Auckland; do
             echo "== TZ=$tz"
             TZ=$tz node --test --test-reporter=spec web/logic.test.js | tee web-test.log
-            # Exits 0 when no tests run, too — require that they did.
+            # Exits 0 when no tests run, too: require that they did.
             grep -q "ℹ tests [1-9]" web-test.log || { echo "::error::No web tests ran"; exit 1; }
           done
 
@@ -307,5 +307,5 @@ jobs:
         run: |
           set -o pipefail
           npm test 2>&1 | tee rules-test.log
-          # Exits 0 when no tests run, too — require that they did.
+          # Exits 0 when no tests run, too: require that they did.
           grep -Eq "[1-9][0-9]* passing" rules-test.log || { echo "::error::No rules tests ran"; exit 1; }

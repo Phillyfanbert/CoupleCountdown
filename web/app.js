@@ -1,4 +1,4 @@
-// app.js — CoupleCountdown web client. Same Firebase project, data model, and
+// app.js: CoupleCountdown web client. Same Firebase project, data model, and
 // Security Rules as the iPhone app, so a partner on the web and a partner on an
 // iPhone share one countdown. Identity is an email + password account, so one
 // person can be signed in on their phone and their computer at the same time;
@@ -50,7 +50,7 @@ const db = getFirestore(fbApp);
 const $app = document.getElementById("app");
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-// localStorage can throw (private mode, blocked storage) — the app must still run.
+// localStorage can throw (private mode, blocked storage): the app must still run.
 // Only device preferences live here now (theme); identity and pairing are on the account.
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -125,19 +125,19 @@ function mount(...nodes) {
 function friendly(e, fallback) {
   const code = e?.code || "";
   if (code.includes("permission-denied") || code.includes("not-found")) return fallback;
-  if (code.includes("unavailable") || code.includes("network")) return "Can't reach the server — check your connection and try again.";
+  if (code.includes("unavailable") || code.includes("network")) return "Can't reach the server. Check your connection and try again.";
   return fallback || e?.message || "Something went wrong.";
 }
 
 function authMessage(e) {
   const code = e?.code || "";
   if (/invalid-credential|wrong-password|user-not-found|invalid-login-credentials/.test(code)) return "Email or password is incorrect.";
-  if (/email-already-in-use|credential-already-in-use/.test(code)) return "There's already an account with that email — sign in instead.";
+  if (/email-already-in-use|credential-already-in-use/.test(code)) return "There's already an account with that email. Sign in instead.";
   if (code.includes("invalid-email")) return "That doesn't look like an email address.";
   if (code.includes("weak-password") || code.includes("missing-password")) return "Use at least 6 characters for your password.";
-  if (code.includes("too-many-requests")) return "Too many attempts — wait a minute and try again.";
-  if (code.includes("network")) return "Can't reach the server — check your connection and try again.";
-  return "Couldn't sign in — try again.";
+  if (code.includes("too-many-requests")) return "Too many attempts. Wait a minute and try again.";
+  if (code.includes("network")) return "Can't reach the server. Check your connection and try again.";
+  return "Couldn't sign in. Try again.";
 }
 
 function applyTheme(id) {
@@ -208,7 +208,7 @@ function startSession(user) {
  */
 function onProfile(snap) {
   // Act only on server-confirmed state. Firestore reports this device's own
-  // writes immediately, before the server has them — after "Create", that
+  // writes immediately, before the server has them, after "Create", that
   // meant opening the new pairing before the server had stored it; the rules
   // deny reading a pairing that doesn't exist yet, and a denied listener
   // never recovers, so the screen was stuck on "can't open that pairing".
@@ -283,11 +283,11 @@ function renderAuth() {
       h("h2", {}, signup ? "Create your account" : "Welcome back"),
       h("p", { class: `small ${upgrading && !signup ? "error" : "muted"}`, id: "authIntro" }, upgrading
         ? signup
-          ? "Create an account to keep the pairing on this browser — then sign in with it on your phone and computer."
+          ? "Create an account to keep the pairing on this browser, then sign in with it on your phone and computer."
           // Signing in replaces the old identity, and a pairing's members
-          // can't change afterwards — so that pairing would be lost for good.
-          : "This browser has a pairing from before accounts. Signing in to an existing account leaves it behind for good — create an account instead to keep it."
-        : "Use the same account on your phone, your computer, and the iPhone app — you'll see the same countdown everywhere."),
+          // can't change afterwards, so that pairing would be lost for good.
+          : "This browser has a pairing from before accounts. Signing in to an existing account leaves it behind for good. Create an account instead to keep it."
+        : "Use the same account on your phone, your computer, and the iPhone app to see the same countdown everywhere."),
       form, note,
       h("div", { class: "row spread" }, toggle, forgot))));
   (signup ? name : email).focus();
@@ -357,7 +357,7 @@ function actionButton(id, label, failedLabel, action) {
 }
 
 function signOutButton() {
-  return actionButton("signOutButton", "Sign out", "Couldn't sign out — tap to try again", () => signOut(auth));
+  return actionButton("signOutButton", "Sign out", "Couldn't sign out. Tap to try again", () => signOut(auth));
 }
 
 // ---------- onboarding ----------
@@ -376,7 +376,7 @@ function nameView() {
       await S.api.saveProfile({ displayName: input.value.trim() });
     } catch (e) {
       console.error("saveProfile failed", e);
-      error.textContent = friendly(e, "Couldn't save — try again.");
+      error.textContent = friendly(e, "Couldn't save. Try again.");
       error.hidden = false;
       go.disabled = false;
     }
@@ -390,8 +390,8 @@ function nameView() {
 
 function choiceView() {
   return h("div", { class: "card stack" },
-    h("h2", {}, `Hi ${S.name} — let's get you two set up`),
-    h("p", { class: "muted" }, "Only one of you should tap Create — have your partner tap Join with the code you'll get next. If you're already paired, sign in with that account instead."),
+    h("h2", {}, `Hi ${S.name}, let's get you two set up`),
+    h("p", { class: "muted" }, "Only one of you should tap Create. Have your partner tap Join with the code you'll get next. If you're already paired, sign in with that account instead."),
     h("button", { class: "btn primary", id: "createPairingButton", onclick: () => startCreate() }, "✨ Create a pairing"),
     h("button", { class: "btn", id: "joinPairingButton", onclick: () => { S.step = "join"; renderOnboarding(); } }, "💌 Join a pairing"),
     h("p", { class: "muted small" }, `Signed in as ${S.user?.email || ""}`),
@@ -412,7 +412,7 @@ async function startCreate() {
     await S.api.createCouple(generateJoinCode(), S.name, timeZone());
   } catch (e) {
     console.error("createCouple failed", e);
-    S.createError = friendly(e, "Couldn't create the pairing — try again.");
+    S.createError = friendly(e, "Couldn't create the pairing. Try again.");
     if (S.screen !== "main") {
       S.step = "create";
       renderOnboarding();
@@ -462,7 +462,7 @@ function joinView() {
       console.error("joinCouple failed", e);
       // Deliberately generic: a wrong, already-full, cancelled, or expired
       // code all fail the Security Rules identically (permission denied).
-      error.textContent = friendly(e, "Couldn't join — check the code and try again.");
+      error.textContent = friendly(e, "Couldn't join. Check the code and try again.");
       error.hidden = false;
       go.disabled = false;
     }
@@ -539,7 +539,7 @@ function listen() {
   );
 }
 
-/** The partner's pings, live — it's how "thinking of you" reaches them. */
+/** The partner's pings, live: it's how "thinking of you" reaches them. */
 function listenPings() {
   S.unsubPings?.();
   S.pings = { all: [], dismissed: new Set(), unseen: [], error: null };
@@ -600,7 +600,7 @@ function partnerProfile() {
 
 /**
  * Keeps this person's time zone on the couple doc current, so the partner's
- * clock for them is right after they travel or move — it used to be written
+ * clock for them is right after they travel or move: it used to be written
  * once, at pairing. Runs when the pairing opens and when the tab comes back
  * into view; not on every update, so two of this person's devices in
  * different zones can't keep overwriting each other.
@@ -628,7 +628,7 @@ async function loadPlan() {
     S.plan = { visits, dates, loaded: true, error: null };
   } catch (e) {
     console.error("loadPlan failed", e);
-    S.plan = { ...S.plan, loaded: true, error: "Couldn't load your plans — switch tabs to try again." };
+    S.plan = { ...S.plan, loaded: true, error: "Couldn't load your plans. Switch tabs to try again." };
   }
   if (S.screen === "main" && (S.tab === "home" || S.tab === "calendar")) renderTab();
 }
@@ -663,7 +663,7 @@ function homeView() {
   const together = c.status === "together";
   const main = [];
 
-  // "Keeping track of the current date" — refreshed by tick().
+  // "Keeping track of the current date", refreshed by tick().
   main.push(h("p", { class: "today muted", id: "todayText" }, todayLabel()));
 
   if (S.pings.unseen.length) main.push(pingCard(c));
@@ -673,7 +673,7 @@ function homeView() {
   main.push(h("div", { class: "row spread", style: "margin-bottom:16px" },
     h("span", { class: "badge", id: "statusBadge" }, together ? "❤️ Together right now" : "🤍 Apart, for now")));
 
-  // Kept current by tick() — it used to be drawn once and then sat frozen.
+  // Kept current by tick(): it used to be drawn once and then sat frozen.
   if (Object.keys(c.partnerProfiles).length) main.push(h("p", { class: "muted small", id: "clocks" }, clockLabels(c)));
 
   const error = h("p", { class: "error", id: "homeError", hidden: true });
@@ -692,7 +692,7 @@ function homeView() {
     h("div", { class: "col-side" }, comingUpCard({ limit: 5 })));
 }
 
-/** "💌 Sam is thinking of you · 2 hours ago" — until dismissed or answered. */
+/** "💌 Sam is thinking of you · 2 hours ago", until dismissed or answered. */
 function pingCard(c) {
   const newest = S.pings.unseen[0];
   const act = async (fn) => {
@@ -701,7 +701,7 @@ function pingCard(c) {
       await fn();
     } catch (e) {
       console.error("ping action failed", e);
-      S.pings.error = "Couldn't update — check your connection and try again.";
+      S.pings.error = "Couldn't update. Check your connection and try again.";
     }
     refreshPings();
     renderTab();
@@ -723,7 +723,7 @@ function clockLabels(c, now = new Date()) {
   return Object.values(c.partnerProfiles).map((p) => localTimeLabel(p.displayName, p.timeZoneIdentifier, now)).join("  ·  ");
 }
 
-/** "Apart for 23 days so far" — how long this stretch apart has lasted (kept current by tick()). */
+/** "Apart for 23 days so far": how long this stretch apart has lasted (kept current by tick()). */
 function apartLine(c) {
   const sep = c.status === "apart" ? ongoingSeparation() : null;
   if (!sep) return null;
@@ -752,7 +752,7 @@ function countdownCard(c) {
     return card(h("div", { class: "empty-big" }, "🗓️"), h("h2", { id: "noDateText" }, "No visit planned yet"), h("p", { class: "muted" }, "When do you see each other next?"), planButton("Plan your next visit", "plan"));
   }
   if (state === "arrived") {
-    // The countdown's done: ask before celebrating — a late flight shouldn't
+    // The countdown's done: ask before celebrating: a late flight shouldn't
     // get congratulations.
     const key = meetupKey(c);
     const notYet = S.metUp.notYet === key;
@@ -779,7 +779,7 @@ function planButton(label, purpose) {
   return h("button", { class: "btn", id: "planVisitButton", style: "margin-top:12px", onclick: () => openVisitModal(purpose) }, label);
 }
 
-/** "Thu, Oct 1 at 6:30 PM" — in the viewer's own time, or in `timeZone`. */
+/** "Thu, Oct 1 at 6:30 PM", in the viewer's own time, or in `timeZone`. */
 function formatWhen(date, timeZone = undefined) {
   const day = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone });
   const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone });
@@ -865,7 +865,7 @@ async function changeStatus(change) {
     await change();
   } catch (e) {
     console.error("status change failed", e);
-    showHomeError("Couldn't update — check your connection and try again.");
+    showHomeError("Couldn't update. Check your connection and try again.");
   }
   setTimeout(() => {
     S.busy = false;
@@ -877,7 +877,7 @@ async function changeStatus(change) {
 function watchSave(saving) {
   saving.catch((e) => {
     console.error("status write failed", e);
-    showHomeError("Couldn't save that change — check your connection and try again.");
+    showHomeError("Couldn't save that change. Check your connection and try again.");
   });
 }
 
@@ -945,7 +945,7 @@ async function onPing(button, error) {
     setTimeout(() => { button.textContent = label; button.disabled = false; }, 2000);
   } catch (e) {
     console.error("sendPing failed", e);
-    error.textContent = "Couldn't send — try again.";
+    error.textContent = "Couldn't send. Try again.";
     error.hidden = false;
     button.disabled = false;
   }
@@ -960,9 +960,9 @@ function openModal(title, label, ...content) {
 }
 
 /**
- * Plan a visit — a date *and time*, so the countdown ends when you actually
+ * Plan a visit: a date *and time*, so the countdown ends when you actually
  * meet (it used to end at midnight in whoever set it's time zone).
- *   leaving: "Leaving again" with nothing planned — also switches to apart.
+ *   leaving: "Leaving again" with nothing planned, also switches to apart.
  *   plan:    fill a missing or passed meetup.
  *   change:  replace the meetup currently counted down to.
  *   calendar: from the Calendar tab; the countdown follows the earliest plan.
@@ -972,7 +972,7 @@ function openVisitModal(purpose, initial = null) {
   const start = initial ?? (purpose === "change" && current && current > new Date() ? current : defaultVisitStart());
   const date = h("input", { type: "date", id: "visitDateInput", value: localISODate(start), min: localISODate(new Date()) });
   const time = h("input", { type: "time", id: "visitTimeInput", value: `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}` });
-  const note = h("input", { type: "text", id: "visitNoteInput", placeholder: "Note (optional) — e.g. Sam lands at LAX", maxlength: "80" });
+  const note = h("input", { type: "text", id: "visitNoteInput", placeholder: "Note (optional), e.g. Sam lands at LAX", maxlength: "80" });
   // With the partner in another time zone, the time can be entered as theirs.
   // It used to be read silently in this browser's zone, so a traveler
   // entering the landing time at the other end ended the countdown hours off.
@@ -1017,7 +1017,7 @@ function openVisitModal(purpose, initial = null) {
       close();
     } catch (e) {
       console.error("saveVisit failed", e);
-      error.textContent = "Couldn't save the visit — check your connection and try again.";
+      error.textContent = "Couldn't save the visit. Check your connection and try again.";
       error.hidden = false;
       save.disabled = false;
     }
@@ -1065,7 +1065,7 @@ async function deleteVisit(visit) {
     if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) await S.api.setNextMeetupDate(S.coupleId, resolved);
   } catch (e) {
     console.error("deleteVisit failed", e);
-    alert("Couldn't delete — check your connection and try again.");
+    alert("Couldn't delete. Check your connection and try again.");
   }
   await loadPlan();
 }
@@ -1085,7 +1085,7 @@ function openImportantDateModal(initialDay = null) {
       await loadPlan();
     } catch (e) {
       console.error("addImportantDate failed", e);
-      error.textContent = "Couldn't save — check your connection and try again.";
+      error.textContent = "Couldn't save. Check your connection and try again.";
       error.hidden = false;
       save.disabled = false;
     }
@@ -1106,7 +1106,7 @@ async function deleteImportantDate(item) {
     await S.api.deleteImportantDate(S.coupleId, item.id);
   } catch (e) {
     console.error("deleteImportantDate failed", e);
-    alert("Couldn't delete — check your connection and try again.");
+    alert("Couldn't delete. Check your connection and try again.");
   }
   await loadPlan();
 }
@@ -1148,7 +1148,7 @@ function comingUpCard({ limit = Infinity } = {}) {
   let body;
   if (!S.plan.loaded) body = h("p", { class: "muted" }, "Loading…");
   else if (S.plan.error) body = h("p", { class: "error" }, S.plan.error);
-  else if (!upcoming.length) body = h("p", { class: "muted", id: "noDatesText" }, "Nothing yet — plan your next visit, or add your anniversary.");
+  else if (!upcoming.length) body = h("p", { class: "muted", id: "noDatesText" }, "Nothing yet. Plan your next visit, or add your anniversary.");
   else body = h("ul", { class: "list", id: "comingUpList" }, upcoming.slice(0, limit).map(agendaRow));
   return h("div", { class: "card", id: "comingUpCard" },
     h("div", { class: "row spread" }, h("h2", {}, "📅 Coming up"),
@@ -1234,7 +1234,7 @@ function statsView() {
       body.replaceChildren(
         row("daysTogetherStat", "❤️ Days together", formatStatDays(stats.totalDaysTogether)),
         row("daysApartStat", "✈️ Days apart", formatStatDays(stats.totalDaysApart)),
-        // How long each stretch apart lasted — the totals alone never said.
+        // How long each stretch apart lasted: the totals alone never said.
         current ? row("currentSeparationStat", "⏳ Apart right now", `${durationLabel(Date.now() - current.start)} so far`) : null,
         finished.length ? row("lastSeparationStat", "🛬 Last time apart", durationLabel(finished.at(-1).end - finished.at(-1).start)) : null,
         finished.length > 1 ? row("longestSeparationStat", "🏆 Longest apart", durationLabel(Math.max(...finished.map((sep) => sep.end - sep.start)))) : null,
@@ -1276,7 +1276,7 @@ function waitingCard() {
       console.error("cancelPairing failed", e);
       // The rules refuse to cancel once the partner has joined, so that's the
       // likely reason.
-      error.textContent = friendly(e, "Couldn't cancel — your partner may have just joined. If not, try again.");
+      error.textContent = friendly(e, "Couldn't cancel. Your partner may have just joined. If not, try again.");
       error.hidden = false;
       cancel.disabled = false;
     }
@@ -1285,12 +1285,12 @@ function waitingCard() {
     h("h2", {}, "Waiting for your partner 💌"),
     h("div", { class: "code", id: "generatedCode" }, S.coupleId),
     shareButtons(S.coupleId),
-    h("p", { class: "muted small" }, "Send this to your partner. They create their own account, tap “Join a pairing”, and enter it — on the web or in the iPhone app."),
+    h("p", { class: "muted small" }, "Send this to your partner. They create their own account, tap “Join a pairing”, and enter it on the web or in the iPhone app."),
     error, cancel);
 }
 
 function leavePairingButton() {
-  return actionButton("leavePairingButton", "Leave this pairing", "Couldn't leave — check your connection and tap to try again", () => S.api.forgetPairing());
+  return actionButton("leavePairingButton", "Leave this pairing", "Couldn't leave. Check your connection and tap to try again", () => S.api.forgetPairing());
 }
 
 boot();

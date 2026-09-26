@@ -1,7 +1,7 @@
-// CoupleCountdownUITests.swift — end-to-end coverage for onboarding, the
+// CoupleCountdownUITests.swift: end-to-end coverage for onboarding, the
 // apart/together toggle, important dates, stats, settings, thinking-of-you,
 // and the milestone celebration overlay. Drives a real CoupleCountdown app
-// instance against the real (free-tier) Firebase project — there is no
+// instance against the real (free-tier) Firebase project: there is no
 // mock backend, so these exercise real Firestore/Auth round-trips.
 //
 // Each test launches with "-uiTestReset" (see CoupleCountdownApp) so it
@@ -74,7 +74,7 @@ final class CoupleCountdownUITests: XCTestCase {
 
     /// iOS's own "Save Password?" prompt (from the Passwords app) appears
     /// anywhere from immediately to ~8s after a successful sign-up or sign-in
-    /// and covers the app — confirmed from the failure recordings, where it
+    /// and covers the app, confirmed from the failure recordings, where it
     /// sat over onboarding's Create/Join buttons. Real users answer it; the
     /// tests decline it. Waits for it (returning as soon as it's handled) so
     /// it can't arrive in the middle of a later step.
@@ -91,7 +91,7 @@ final class CoupleCountdownUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for notNow in [app.buttons["Not Now"], springboard.buttons["Not Now"]] where notNow.exists {
             notNow.tap()
-            // Let it finish animating away — a tap made while it's still
+            // Let it finish animating away: a tap made while it's still
             // leaving can be swallowed.
             Thread.sleep(forTimeInterval: 1)
             return true
@@ -126,7 +126,7 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTFail("Tapping \(element) never led to \(next)", file: file, line: line)
     }
 
-    /// Taps `element` once it's actually tappable (existing isn't enough —
+    /// Taps `element` once it's actually tappable (existing isn't enough:
     /// an earlier run tapped buttons that were covered and the taps went
     /// nowhere: "hit point {-1, -1}"), declining the save-password prompt if
     /// it's the thing in the way.
@@ -194,7 +194,7 @@ final class CoupleCountdownUITests: XCTestCase {
 
         let codeText = app.staticTexts["generatedCodeText"]
         tap(app.buttons["createPairingButton"], until: codeText, in: app)
-        XCTAssertTrue(codeText.exists, "Pairing code was never generated — createCouple() Firestore write likely failed")
+        XCTAssertTrue(codeText.exists, "Pairing code was never generated: createCouple() Firestore write likely failed")
         let code = codeText.label
         XCTAssertEqual(code.count, 6, "Join code should be 6 characters, got \"\(code)\"")
 
@@ -203,7 +203,7 @@ final class CoupleCountdownUITests: XCTestCase {
     }
 
     /// CountdownView's toolbar puts calendarNavLink/settingsNavLink
-    /// at .secondaryAction placement — on the iPhone widths CI runs
+    /// at .secondaryAction placement, on the iPhone widths CI runs
     /// against, iOS collapses those into a "More" overflow button
     /// (identifier "OverflowBarButtonItem") rather than showing them
     /// directly, confirmed via a real failed run's accessibility snapshot.
@@ -220,7 +220,7 @@ final class CoupleCountdownUITests: XCTestCase {
         overflow.tap()
         // A real run showed identifier-only matching (scoped to `.any`'s
         // default identifier-only subscript behavior) didn't find the item
-        // once inside the overflow menu — its exact XCUIElementType and
+        // once inside the overflow menu: its exact XCUIElementType and
         // whether the SwiftUI accessibilityIdentifier survives UIKit's
         // overflow-menu synthesis are both unconfirmed, so match broadly
         // by either identifier or the visible label text instead.
@@ -437,24 +437,24 @@ final class CoupleCountdownUITests: XCTestCase {
         app.buttons["saveImportantDateButton"].tap()
 
         // Distinguish "the sheet never dismissed" (the write itself
-        // failed — AddImportantDateView only calls dismiss() after a
+        // failed: AddImportantDateView only calls dismiss() after a
         // successful write) from "the list never reflected the new item"
         // (a reload/rendering issue), rather than one bare assertion that
         // can't tell those apart.
         XCTAssertTrue(
             waitForNonExistence(of: labelField, timeout: 10),
-            "Add Important Date sheet never dismissed after tapping Save — the addImportantDate() write itself likely failed"
+            "Add Important Date sheet never dismissed after tapping Save: the addImportantDate() write itself likely failed"
         )
 
         // .otherElements assumed the wrong resolved type for another
         // .accessibilityElement(children: .combine) view elsewhere in this
-        // suite (see testMilestoneCelebrationShowsAndDismissesOnTap) —
+        // suite (see testMilestoneCelebrationShowsAndDismissesOnTap):
         // search by identifier across any type here too, with the label
         // text as a second fallback.
         let row = app.staticTexts["Anniversary"].firstMatch
         let rowExists = app.descendants(matching: .any)["importantDateRow_Anniversary"].waitForExistence(timeout: 15)
             || row.waitForExistence(timeout: 5)
-        XCTAssertTrue(rowExists, "Saved important date never appeared back in the list — addImportantDate() write or the subsequent reload likely failed")
+        XCTAssertTrue(rowExists, "Saved important date never appeared back in the list: addImportantDate() write or the subsequent reload likely failed")
     }
 
     // MARK: - Stats
@@ -499,7 +499,7 @@ final class CoupleCountdownUITests: XCTestCase {
         XCTAssertTrue(sunsetRow.waitForExistence(timeout: 10))
         sunsetRow.tap()
 
-        XCTAssertTrue(sunsetRow.isSelected, "Tapping a theme should mark it selected — SettingsView must be reading/writing the same shared AppStorage store ThemedBackground reads from")
+        XCTAssertTrue(sunsetRow.isSelected, "Tapping a theme should mark it selected: SettingsView must be reading/writing the same shared AppStorage store ThemedBackground reads from")
         XCTAssertFalse(app.buttons["theme_blush"].isSelected, "Only the tapped theme should be marked selected")
     }
 
@@ -558,7 +558,7 @@ final class CoupleCountdownUITests: XCTestCase {
         completeOnboardingByCreating(app)
 
         // Scoped to .otherElements this failed on a real run even with a
-        // generous 30s auto-dismiss window under test — .accessibilityElement
+        // generous 30s auto-dismiss window under test: .accessibilityElement
         // (children: .combine) on a Text-only VStack doesn't reliably
         // resolve to XCUIElementType.other, so search by identifier across
         // any element type instead of guessing the resolved type.

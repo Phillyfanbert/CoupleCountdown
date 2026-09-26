@@ -1,13 +1,13 @@
-// WidgetFirestoreClient.swift — plain URLSession Firestore REST fetch, no Firebase SDK (DESIGN.md §5.2 #4, §5.5)
+// WidgetFirestoreClient.swift: plain URLSession Firestore REST fetch, no Firebase SDK (DESIGN.md §5.2 #4, §5.5)
 
 import Foundation
 import CoupleCountdownKit
 
-/// The widget's own independent data fetch (§5.2 mechanism #4) — plain
+/// The widget's own independent data fetch (§5.2 mechanism #4): plain
 /// REST against the Firestore API, no Firebase SDK bundled into the
 /// extension to stay under its memory ceiling. Never throws; every failure
 /// path returns nil so the caller falls back to the App Group cache (§5.5's
-/// failure-mode behavior — the widget should never show an error state,
+/// failure-mode behavior: the widget should never show an error state,
 /// only ever "last known good"). Response decoding lives in
 /// CoupleCountdownKit's `FirestoreREST`, where it's unit-tested.
 struct WidgetFirestoreClient {

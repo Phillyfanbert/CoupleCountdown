@@ -1,4 +1,4 @@
-// ReceivedPingCard.swift — shows the partner's "thinking of you" on the countdown screen (DESIGN.md §7.1)
+// ReceivedPingCard.swift: shows the partner's "thinking of you" on the countdown screen (DESIGN.md §7.1)
 
 import SwiftUI
 import CoupleCountdownKit
@@ -50,7 +50,7 @@ struct ReceivedPingCard: View {
             }
             .disabled(isWorking)
             if failed {
-                Text("Couldn't update — check your connection and try again.")
+                Text("Couldn't update. Check your connection and try again.")
                     .font(.caption)
                     .foregroundStyle(.red)
             }

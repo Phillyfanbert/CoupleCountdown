@@ -1,4 +1,4 @@
-// AddImportantDateView.swift — form for adding a new anniversary/important date (DESIGN.md §7.4)
+// AddImportantDateView.swift: form for adding a new anniversary/important date (DESIGN.md §7.4)
 
 import SwiftUI
 import CoupleCountdownKit
@@ -51,7 +51,7 @@ struct AddImportantDateView: View {
         guard let uid = authService.uid else { return }
         isSaving = true
         errorMessage = nil
-        // Deliberately separate from RelationshipState/nextMeetupDate —
+        // Deliberately separate from RelationshipState/nextMeetupDate:
         // informational countdowns, not tied to the apart/together state
         // machine (§7.4).
         let newDate = ImportantDate(
@@ -67,12 +67,12 @@ struct AddImportantDateView: View {
         do {
             try await firestore.addImportantDate(newDate, coupleId: coupleId)
             // Only report success and dismiss if the write actually
-            // succeeded — previously this ran unconditionally, so a
+            // succeeded, previously this ran unconditionally, so a
             // failed save looked identical to a successful one.
             onSaved()
             dismiss()
         } catch {
-            errorMessage = "Couldn't save — check your connection and try again."
+            errorMessage = "Couldn't save. Check your connection and try again."
         }
         isSaving = false
     }

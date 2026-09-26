@@ -1,4 +1,4 @@
-// CountdownViewModel.swift — drives CountdownView from the synced RelationshipState (DESIGN.md §8)
+// CountdownViewModel.swift: drives CountdownView from the synced RelationshipState (DESIGN.md §8)
 
 import Foundation
 import CoupleCountdownKit
@@ -63,12 +63,12 @@ final class CountdownViewModel: ObservableObject {
     /// nonisolated: Firestore calls it from its own completion handler.
     nonisolated private func reportFailure(_ error: Error) {
         Task { @MainActor [weak self] in
-            self?.errorMessage = "Couldn't save that change — check your connection and try again."
+            self?.errorMessage = "Couldn't save that change. Check your connection and try again."
         }
     }
 
     /// Together → apart. Every goodbye is a new trip, so this counts down to
-    /// the next *planned* visit — or asks for one if none is planned.
+    /// the next *planned* visit, or asks for one if none is planned.
     /// Previously it only asked when no date had ever been set, so after the
     /// first trip "Leaving again" silently reused the old, already-passed
     /// date and there was no way on iPhone to enter the next one.
@@ -86,7 +86,7 @@ final class CountdownViewModel: ObservableObject {
             firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next.start, onFailure: reportFailure)
             return next.start
         } catch {
-            errorMessage = "Couldn't update — check your connection and try again."
+            errorMessage = "Couldn't update. Check your connection and try again."
             return nil
         }
     }
@@ -137,7 +137,7 @@ final class CountdownViewModel: ObservableObject {
             visitSheetPurpose = nil
             return updated
         } catch {
-            errorMessage = "Couldn't save the visit — check your connection and try again."
+            errorMessage = "Couldn't save the visit. Check your connection and try again."
             return nil
         }
     }

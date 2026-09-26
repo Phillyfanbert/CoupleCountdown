@@ -1,4 +1,4 @@
-// BackgroundRefreshScheduler.swift — BGAppRefreshTask scheduling + firing-frequency instrumentation (DESIGN.md §5.2 #3, §10)
+// BackgroundRefreshScheduler.swift: BGAppRefreshTask scheduling + firing-frequency instrumentation (DESIGN.md §5.2 #3, §10)
 
 import Foundation
 import BackgroundTasks
@@ -50,7 +50,7 @@ final class BackgroundRefreshScheduler {
     }
 
     /// What a background refresh does: the latest state of this device's
-    /// pairing into the widget's cache, then a widget reload — a launch fetch
+    /// pairing into the widget's cache, then a widget reload: a launch fetch
     /// without the app on screen.
     static func refreshWidgetData() async {
         guard Auth.auth().currentUser != nil,
@@ -68,7 +68,7 @@ final class BackgroundRefreshScheduler {
         defaults.set(log, forKey: firingLogKey)
     }
 
-    /// Timestamps of every observed firing — read this to compute the
+    /// Timestamps of every observed firing: read this to compute the
     /// real-world frequency for §10's decision.
     func firingHistory() -> [Date] {
         let log = defaults.array(forKey: firingLogKey) as? [Double] ?? []

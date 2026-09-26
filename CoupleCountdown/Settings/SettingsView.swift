@@ -1,10 +1,10 @@
-// SettingsView.swift — per-couple theme selection and app settings (DESIGN.md §9)
+// SettingsView.swift: per-couple theme selection and app settings (DESIGN.md §9)
 
 import SwiftUI
 import CoupleCountdownKit
 
 struct SettingsView: View {
-    // Same shared App Group store as ThemedBackground reads from — was
+    // Same shared App Group store as ThemedBackground reads from: was
     // previously the default local store, meaning a theme choice here
     // would never actually have been reflected anywhere it's displayed.
     @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))

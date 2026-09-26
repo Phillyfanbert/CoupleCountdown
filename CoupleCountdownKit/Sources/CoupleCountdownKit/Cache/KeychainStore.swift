@@ -1,4 +1,4 @@
-// KeychainStore.swift — shared Keychain access-group read/write helper for app <-> widget (DESIGN.md §5.5)
+// KeychainStore.swift: shared Keychain access-group read/write helper for app <-> widget (DESIGN.md §5.5)
 
 import Foundation
 import Security
@@ -18,7 +18,7 @@ public struct KeychainStore {
         self.account = account
     }
 
-    /// Returns whether the write actually succeeded — callers that care
+    /// Returns whether the write actually succeeded: callers that care
     /// about silent Keychain failures (e.g. entitlement issues, the same
     /// class of bug that caused Firebase Auth's own Keychain write to
     /// fail during CI verification) should check this rather than assume

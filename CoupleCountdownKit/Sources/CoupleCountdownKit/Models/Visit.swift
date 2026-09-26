@@ -1,11 +1,11 @@
-// Visit.swift — a planned time together, and how the main countdown follows the plan
+// Visit.swift: a planned time together, and how the main countdown follows the plan
 
 import Foundation
 
 /// Mirrors `couples/{coupleId}/visits/{id}`: a planned meetup with a real
 /// time ("Oct 1, 6:30 PM", when the flight lands), so a couple can have
-/// several coming up and see them on the calendar. `start` is a true instant
-/// — unlike an anniversary, a meeting time means the same moment for both
+/// several coming up and see them on the calendar. `start` is a true instant:
+/// unlike an anniversary, a meeting time means the same moment for both
 /// partners, just shown in each one's local time.
 public struct Visit: Codable, Equatable, Identifiable, Sendable {
     public var id: String
@@ -21,8 +21,8 @@ public struct Visit: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// How `RelationshipState.nextMeetupDate` — what the main countdown and the
-/// widget count down to — follows the planned visits. Mirrored in
+/// How `RelationshipState.nextMeetupDate` (what the main countdown and the
+/// widget count down to) follows the planned visits. Mirrored in
 /// web/logic.js; keep the two in step.
 public enum MeetupPlanner {
     /// The earliest visit that hasn't started yet.
@@ -60,7 +60,7 @@ public enum MeetupPlanner {
     /// Saying you're together shortly *before* the planned visit's start
     /// means that visit is happening now. Returns the visit the countdown
     /// pointed at if it's due within `metEarlyWindow`, so it can be moved to
-    /// now — otherwise "Leaving again" before its original time counted down
+    /// now, otherwise "Leaving again" before its original time counted down
     /// to it all over again. Mirrors visitMetEarly in web/logic.js.
     public static func visitMetEarly(current: Date?, visits: [Visit], now: Date = Date()) -> Visit? {
         guard let current, current > now, current.timeIntervalSince(now) <= metEarlyWindow else { return nil }
@@ -68,7 +68,7 @@ public enum MeetupPlanner {
     }
 
     /// The same wall-clock time in another time zone: 6:30 PM entered as
-    /// your time, switched to your partner's, stays 6:30 PM — theirs.
+    /// your time, switched to your partner's, stays 6:30 PM: theirs.
     public static func sameWallTime(_ date: Date, from source: TimeZone, to target: TimeZone) -> Date {
         var sourceCalendar = Calendar(identifier: .gregorian)
         sourceCalendar.timeZone = source

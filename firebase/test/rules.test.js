@@ -1,5 +1,5 @@
 // Emulator tests for firestore.rules (DESIGN.md §5.3).
-// Run via `npm test` from firebase/ — starts the Firestore emulator and
+// Run via `npm test` from firebase/: starts the Firestore emulator and
 // runs this suite against it, then tears the emulator down.
 
 const fs = require('fs');
@@ -50,7 +50,7 @@ afterEach(async () => {
   await testEnv.clearFirestore();
 });
 
-// Seeds a couple doc directly, bypassing rules — this is setup, not what's
+// Seeds a couple doc directly, bypassing rules: this is setup, not what's
 // under test.
 async function seedCouple(participantUIDs) {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -69,7 +69,7 @@ function coupleDoc(uid) {
   return doc(ctx.firestore(), 'couples', COUPLE_ID);
 }
 
-describe('couples/{coupleId} — create', () => {
+describe('couples/{coupleId}: create', () => {
   it('allows creating a couple doc with exactly [self] as participantUIDs', async () => {
     await assertSucceeds(
       setDoc(coupleDoc(UID_A), {
@@ -107,7 +107,7 @@ describe('couples/{coupleId} — create', () => {
   });
 });
 
-describe('couples/{coupleId} — join while open', () => {
+describe('couples/{coupleId}: join while open', () => {
   it('lets a second, different uid append itself when a slot is open', async () => {
     await seedCouple([UID_A]);
     await assertSucceeds(
@@ -142,7 +142,7 @@ describe('couples/{coupleId} — join while open', () => {
   });
 });
 
-describe('couples/{coupleId} — cancelled pairing', () => {
+describe('couples/{coupleId}: cancelled pairing', () => {
   it('lets the creator mark their still-open pairing closed', async () => {
     await seedCouple([UID_A]);
     await assertSucceeds(updateDoc(coupleDoc(UID_A), { closed: true }));
@@ -162,7 +162,7 @@ describe('couples/{coupleId} — cancelled pairing', () => {
   });
 });
 
-describe('couples/{coupleId} — join while full', () => {
+describe('couples/{coupleId}: join while full', () => {
   it('rejects a third uid trying to join once both slots are filled', async () => {
     await seedCouple([UID_A, UID_B]);
     await assertFails(
@@ -171,7 +171,7 @@ describe('couples/{coupleId} — join while full', () => {
   });
 });
 
-describe('couples/{coupleId} — stranger read while full', () => {
+describe('couples/{coupleId}: stranger read while full', () => {
   it('rejects a non-participant reading the doc once both slots are filled', async () => {
     await seedCouple([UID_A, UID_B]);
     await assertFails(getDoc(coupleDoc(UID_C)));
@@ -188,7 +188,7 @@ describe('couples/{coupleId} — stranger read while full', () => {
   });
 });
 
-describe('couples/{coupleId} — own participant edit', () => {
+describe('couples/{coupleId}: own participant edit', () => {
   it('lets a participant edit ordinary fields (e.g. status)', async () => {
     await seedCouple([UID_A, UID_B]);
     await assertSucceeds(
@@ -206,7 +206,7 @@ describe('couples/{coupleId} — own participant edit', () => {
   });
 });
 
-describe('couples/{coupleId} — membership tamper attempt', () => {
+describe('couples/{coupleId}: membership tamper attempt', () => {
   it('rejects a participant changing participantUIDs via a normal edit (e.g. removing the other partner)', async () => {
     await seedCouple([UID_A, UID_B]);
     await assertFails(
@@ -222,7 +222,7 @@ describe('couples/{coupleId} — membership tamper attempt', () => {
   });
 });
 
-describe('couples/{coupleId}/{sub=**} — subcollections', () => {
+describe('couples/{coupleId}/{sub=**}: subcollections', () => {
   it('lets a participant write into a subcollection (e.g. events)', async () => {
     await seedCouple([UID_A, UID_B]);
     await assertSucceeds(
@@ -260,7 +260,7 @@ describe('couples/{coupleId}/{sub=**} — subcollections', () => {
   });
 });
 
-describe('couples/{coupleId} — time tracking writes', () => {
+describe('couples/{coupleId}: time tracking writes', () => {
   it('allows recording pairedAt when creating a pairing', async () => {
     await assertSucceeds(
       setDoc(doc(testEnv.authenticatedContext(UID_A).firestore(), 'couples', COUPLE_ID), {
@@ -292,7 +292,7 @@ describe('couples/{coupleId} — time tracking writes', () => {
   });
 });
 
-describe('couples/{coupleId}/pings — "thinking of you"', () => {
+describe('couples/{coupleId}/pings: "thinking of you"', () => {
   const since = new Date(Date.now() - 5 * 86400000);
   const recentPings = (uid) =>
     query(collection(testEnv.authenticatedContext(uid).firestore(), 'couples', COUPLE_ID, 'pings'), where('sentAt', '>', since));
@@ -328,7 +328,7 @@ function userDoc(asUid, ofUid) {
   return doc(ctx.firestore(), 'users', ofUid);
 }
 
-describe('users/{userId} — per-account record', () => {
+describe('users/{userId}: per-account record', () => {
   it('lets an account write and read its own record', async () => {
     await assertSucceeds(setDoc(userDoc(UID_A, UID_A), { displayName: 'Alex', coupleId: COUPLE_ID }));
     await assertSucceeds(getDoc(userDoc(UID_A, UID_A)));

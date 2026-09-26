@@ -1,9 +1,9 @@
-// ImportantDate.swift — anniversary/important-date countdown model (DESIGN.md §5.1, §7.4)
+// ImportantDate.swift: anniversary/important-date countdown model (DESIGN.md §5.1, §7.4)
 
 import Foundation
 
 /// Mirrors `couples/{coupleId}/importantDates/{id}` (DESIGN.md §5.1, §7.4).
-/// Deliberately separate from `RelationshipState` — these are
+/// Deliberately separate from `RelationshipState`: these are
 /// informational countdowns, not tied to the apart/together state
 /// machine (§8).
 public struct ImportantDate: Codable, Equatable, Identifiable, Sendable {
@@ -23,7 +23,7 @@ public struct ImportantDate: Codable, Equatable, Identifiable, Sendable {
         self.createdBy = createdBy
     }
 
-    /// The calendar day this date is on — the same for both partners,
+    /// The calendar day this date is on: the same for both partners,
     /// whatever their time zones.
     public var day: CalendarDay {
         CalendarDay(stored: date)
@@ -31,7 +31,7 @@ public struct ImportantDate: Codable, Equatable, Identifiable, Sendable {
 
     /// The next occurrence to count down to, as local midnight of that day.
     /// A yearly date rolls forward to next year only once its day has fully
-    /// passed — on the day itself it's "today", not 365 days away (compared
+    /// passed, on the day itself it's "today", not 365 days away (compared
     /// against the start of today, not the current instant). A one-off date
     /// is returned as-is, even if past.
     public func nextOccurrence(now: Date = Date(), calendar: Calendar = .current) -> Date {

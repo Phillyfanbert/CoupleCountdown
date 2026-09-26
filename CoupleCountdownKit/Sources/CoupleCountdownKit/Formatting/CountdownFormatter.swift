@@ -1,4 +1,4 @@
-// CountdownFormatter.swift — countdown/time zone display formatting shared by app & widget (DESIGN.md §6, §9.1)
+// CountdownFormatter.swift: countdown/time zone display formatting shared by app & widget (DESIGN.md §6, §9.1)
 
 import Foundation
 
@@ -9,7 +9,7 @@ public enum CountdownFormatter {
         calendar.dateComponents([.day], from: calendar.startOfDay(for: from), to: calendar.startOfDay(for: to)).day ?? 0
     }
 
-    /// "Today", "Tomorrow", "in 12 days", "Yesterday", "3 days ago" —
+    /// "Today", "Tomorrow", "in 12 days", "Yesterday", "3 days ago":
     /// matches relativeDayLabel in web/logic.js.
     public static func relativeDayLabel(_ days: Int) -> String {
         switch days {
@@ -21,7 +21,7 @@ public enum CountdownFormatter {
         }
     }
 
-    /// Whole days, hours, minutes, and seconds left — what the countdown
+    /// Whole days, hours, minutes, and seconds left: what the countdown
     /// shows. Mirrors countdownParts in web/logic.js.
     public struct Parts: Equatable, Sendable {
         public var days: Int
@@ -76,7 +76,7 @@ public enum CountdownFormatter {
     /// (drawn as text) and when the current partial day runs out (the end of
     /// a live `Text(timerInterval:)` showing the hours, minutes, and seconds).
     /// Exactly on a day boundary the new day counts as partial, so the timer
-    /// runs a full 24 hours instead of sitting at 0:00 — a half-second
+    /// runs a full 24 hours instead of sitting at 0:00: a half-second
     /// tolerance keeps floating-point noise from tipping that the wrong way.
     public static func widgetDay(until target: Date, from now: Date) -> (days: Int, dayEnds: Date)? {
         let remaining = target.timeIntervalSince(now)
@@ -100,7 +100,7 @@ public enum CountdownFormatter {
     }
 
     /// "Her: 9:14 PM CDT" style formatting for a partner's current local
-    /// time (DESIGN.md §9.1) — display-only, doesn't touch how
+    /// time (DESIGN.md §9.1): display-only, doesn't touch how
     /// `nextMeetupDate` is stored or computed.
     public static func localTimeString(label: String, timeZoneIdentifier: String, now: Date = Date()) -> String {
         let timeZone = TimeZone(identifier: timeZoneIdentifier) ?? .current
