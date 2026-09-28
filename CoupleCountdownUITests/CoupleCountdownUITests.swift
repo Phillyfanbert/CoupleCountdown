@@ -184,6 +184,36 @@ final class CoupleCountdownUITests: XCTestCase {
         confirm.buttons["Pair"].tap()
     }
 
+    /// From onboarding: enter the partner's code, confirm whose it is, and
+    /// land on "Waiting for … to approve".
+    private func askToJoin(_ app: XCUIApplication, code: String, expecting creator: String, file: StaticString = #filePath, line: UInt = #line) {
+        let codeField = app.textFields["joinCodeTextField"]
+        tap(app.buttons["joinPairingButton"], until: codeField, in: app, file: file, line: line)
+        codeField.tap()
+        codeField.typeText(code)
+        joinAndConfirm(app, expecting: creator, file: file, line: line)
+        XCTAssertTrue(app.staticTexts["awaitingApprovalText"].waitForExistence(timeout: 20), "Asking to join should wait for the creator's approval", file: file, line: line)
+    }
+
+    /// The creator is asked "Pair with Sam Lee?" when they open the app;
+    /// answers it with `button` ("Approve" or "Decline").
+    private func answerJoinRequest(_ app: XCUIApplication, from name: String, with button: String, file: StaticString = #filePath, line: UInt = #line) {
+        let question = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "Pair with")).firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 30), "The creator should be asked to approve the request", file: file, line: line)
+        XCTAssertTrue(question.label.contains(name), "The approval should name \(name), got: \(question.label)", file: file, line: line)
+        tapWhenReady(question.buttons[button], in: app, file: file, line: line)
+        XCTAssertTrue(
+            waitForNonExistence(of: app.descendants(matching: .any)["joinRequestCard"], timeout: 15),
+            "Answering should clear the request", file: file, line: line
+        )
+    }
+
+    /// Settings → Sign out, from the countdown screen.
+    private func signOut(_ app: XCUIApplication) {
+        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
+        tapWhenReady(app.buttons["signOutButton"], in: app)
+    }
+
     private func signIn(_ app: XCUIApplication, email: String, password: String) {
         let toggle = app.buttons["authToggleButton"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 20), "Sign-in screen never appeared")
@@ -532,30 +562,27 @@ final class CoupleCountdownUITests: XCTestCase {
     }
 
     func testWhenBothCreatedCodesJoiningTheirsDiscardsYours() {
-        // Both tapped Create. Sam joins Alex's code from the waiting card,
-        // after confirming it's Alex's, and Sam's own code is closed in the
-        // same save, so nobody can join it afterwards.
+        // Both tapped Create. Sam asks to join Alex's code from the waiting
+        // card, after confirming it's Alex's; Sam's own code is closed in the
+        // same save, so nobody can join it afterwards. Alex approves.
         var app = launchFreshApp()
         let (alexEmail, alexCode) = completeOnboardingByCreating(app, name: "Alex")
-        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
-        tapWhenReady(app.buttons["signOutButton"], in: app)
+        signOut(app)
 
-        signUp(app, name: "Sam", lastName: "Lee")
+        let samEmail = signUp(app, name: "Sam", lastName: "Lee")
         let samCodeText = app.staticTexts["generatedCodeText"]
         tap(app.buttons["createPairingButton"], until: samCodeText, in: app)
         let samCode = samCodeText.label
         tap(app.buttons["continueToCountdownButton"], until: app.buttons["joinInsteadButton"], in: app)
-
         let codeField = app.textFields["joinCodeTextField"]
         tap(app.buttons["joinInsteadButton"], until: codeField, in: app)
         codeField.tap()
         codeField.typeText(alexCode)
         joinAndConfirm(app, expecting: "Alex Tester")
-        XCTAssertTrue(waitForNonExistence(of: app.staticTexts["waitingCodeText"], timeout: 20), "Sam should now be paired with Alex, not waiting on their own code")
+        XCTAssertTrue(app.staticTexts["awaitingApprovalText"].waitForExistence(timeout: 20), "Sam should wait for Alex's approval")
+        signOut(app)
 
         // Sam's unused code was discarded: someone else trying it is told so.
-        // (Relaunching with the reset deletes Sam's test account.)
-        app = launchFreshApp()
         signUp(app, name: "Casey", lastName: "Other")
         let otherCodeField = app.textFields["joinCodeTextField"]
         tap(app.buttons["joinPairingButton"], until: otherCodeField, in: app)
@@ -565,34 +592,66 @@ final class CoupleCountdownUITests: XCTestCase {
         tap(app.buttons["joinButton"], until: error, in: app)
         XCTAssertTrue(error.label.contains("cancelled"), "Sam's own code should no longer be joinable, got: \(error.label)")
 
-        // Alex sees the pairing with Sam. (This also leaves Alex signed in,
-        // so the next reset deletes that test account too.)
+        // Alex approves Sam. (Relaunching with the reset deletes Casey.)
         app = launchFreshApp()
         signIn(app, email: alexEmail, password: testPassword)
+        answerJoinRequest(app, from: "Sam Lee", with: "Approve")
         let samsClock = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Sam:")).firstMatch
-        XCTAssertTrue(samsClock.waitForExistence(timeout: 20), "Alex should be paired with Sam")
+        XCTAssertTrue(samsClock.waitForExistence(timeout: 20), "Approving should pair Alex with Sam")
+
+        // Sam is paired too. (Relaunching deletes Alex; the next reset deletes Sam.)
+        app = launchFreshApp()
+        signIn(app, email: samEmail, password: testPassword)
+        let alexsClock = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Alex:")).firstMatch
+        XCTAssertTrue(alexsClock.waitForExistence(timeout: 20), "Sam should be paired with Alex once approved")
         declineSavePasswordPrompt(app)
-        XCTAssertFalse(app.staticTexts["waitingCodeText"].exists)
+        XCTAssertFalse(app.staticTexts["awaitingApprovalText"].exists)
+    }
+
+    func testCreatorCanDeclineAJoinRequest() {
+        // Nobody is paired without the creator's say-so: Alex declines, and
+        // Sam is told and goes back to Create/Join.
+        var app = launchFreshApp()
+        let (alexEmail, code) = completeOnboardingByCreating(app, name: "Alex")
+        signOut(app)
+
+        let samEmail = signUp(app, name: "Sam")
+        askToJoin(app, code: code, expecting: "Alex Tester")
+        signOut(app)
+
+        signIn(app, email: alexEmail, password: testPassword)
+        answerJoinRequest(app, from: "Sam Tester", with: "Decline")
+        XCTAssertTrue(app.staticTexts["waitingCodeText"].exists, "Declining keeps Alex's code open")
+
+        // Relaunching deletes Alex; the next reset deletes Sam.
+        app = launchFreshApp()
+        signIn(app, email: samEmail, password: testPassword)
+        let declined = app.staticTexts["requestDeclinedText"]
+        XCTAssertTrue(declined.waitForExistence(timeout: 20), "Sam should be told the request wasn't approved")
+        declineSavePasswordPrompt(app)
+        tap(app.buttons["requestDeclinedOKButton"], until: app.buttons["createPairingButton"], in: app)
     }
 
     func testPartnerSeesThinkingOfYouAndCanDismissIt() {
-        // Regression: pings were sent and then never shown to anyone. Two
-        // real accounts: Alex creates, Sam joins and sends one, then Alex
-        // signs back in and sees it.
+        // Two real accounts: Alex creates, Sam asks to join and Alex
+        // approves, Sam sends a "thinking of you", and Alex sees it. (Pings
+        // were once sent and never shown to anyone.)
         var app = launchFreshApp()
         let (alexEmail, code) = completeOnboardingByCreating(app, name: "Alex")
-        tapToolbarItem(app, identifier: "settingsNavLink", label: "Settings")
-        tapWhenReady(app.buttons["signOutButton"], in: app)
+        signOut(app)
 
-        signUp(app, name: "Sam")
-        let codeField = app.textFields["joinCodeTextField"]
-        tap(app.buttons["joinPairingButton"], until: codeField, in: app)
-        codeField.tap()
-        codeField.typeText(code)
-        joinAndConfirm(app, expecting: "Alex Tester")
-        XCTAssertTrue(app.buttons["toggleStatusButton"].waitForExistence(timeout: 20), "Confirming should pair Sam with Alex")
+        let samEmail = signUp(app, name: "Sam")
+        askToJoin(app, code: code, expecting: "Alex Tester")
+        signOut(app)
 
+        signIn(app, email: alexEmail, password: testPassword)
+        answerJoinRequest(app, from: "Sam Tester", with: "Approve")
+        signOut(app)
+
+        signIn(app, email: samEmail, password: testPassword)
         let pingButton = app.buttons["thinkingOfYouButton"]
+        XCTAssertTrue(pingButton.waitForExistence(timeout: 20), "Once approved, Sam should be paired")
+        declineSavePasswordPrompt(app)
         tapWhenReady(pingButton, in: app)
         expectation(for: NSPredicate(format: "label CONTAINS %@", "Sent, with love"), evaluatedWith: pingButton, handler: nil)
         waitForExpectations(timeout: 15)

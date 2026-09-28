@@ -26,6 +26,10 @@ struct CountdownView: View {
     @State private var isConfirmingCancel = false
     /// "Join your partner's code instead", from the waiting card.
     @State private var isJoiningPartnersCode = false
+    /// Someone asked to join: the creator's popup, once per request.
+    @State private var approvalRequest: JoinRequest?
+    @State private var approvalAskedFor: String?
+    @State private var approvalError: String?
     @State private var cancelError: String?
     @State private var leaveError: String?
     /// True while a status change runs, and for a second after: the main
@@ -60,6 +64,7 @@ struct CountdownView: View {
             firestore: firestore,
             cache: AppGroupCache(suiteName: SharedIdentifiers.appGroup),
             coupleId: coupleId,
+            uid: uid,
             widgetKind: "CountdownWidget"
         ))
         _viewModel = StateObject(wrappedValue: CountdownViewModel(firestore: firestore, coupleId: coupleId, uid: uid))
@@ -91,21 +96,25 @@ struct CountdownView: View {
             }
             .navigationTitle("💕 CoupleCountdown")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    NavigationLink { StatsView(coupleId: coupleId, pairedAt: sync.state?.pairedAt) } label: {
-                        Image(systemName: "chart.bar.fill")
-                    }
-                    .accessibilityIdentifier("statsNavLink")
-                }
-                ToolbarItem(placement: .secondaryAction) {
-                    NavigationLink {
-                        CalendarScreen(coupleId: coupleId, partner: partnerProfile) { newState in
-                            sync.applyLocalWrite(newState)
+                // Stats and Calendar need the pairing's data, which someone
+                // still waiting for approval can't read yet.
+                if isParticipant {
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink { StatsView(coupleId: coupleId, pairedAt: sync.state?.pairedAt) } label: {
+                            Image(systemName: "chart.bar.fill")
                         }
-                    } label: {
-                        Label("Calendar", systemImage: "calendar")
+                        .accessibilityIdentifier("statsNavLink")
                     }
-                    .accessibilityIdentifier("calendarNavLink")
+                    ToolbarItem(placement: .secondaryAction) {
+                        NavigationLink {
+                            CalendarScreen(coupleId: coupleId, partner: partnerProfile) { newState in
+                                sync.applyLocalWrite(newState)
+                            }
+                        } label: {
+                            Label("Calendar", systemImage: "calendar")
+                        }
+                        .accessibilityIdentifier("calendarNavLink")
+                    }
                 }
                 ToolbarItem(placement: .secondaryAction) {
                     NavigationLink { SettingsView() } label: {
@@ -166,8 +175,29 @@ struct CountdownView: View {
                     apartFor: ongoingSeparation?.duration()
                 )
             }
+            // Someone asked to join with this code: ask the creator, once per request.
+            if newState.participantUIDs == [uid], let request = newState.joinRequest {
+                let key = "\(request.uid)-\(request.requestedAt?.timeIntervalSince1970 ?? 0)"
+                if approvalAskedFor != key {
+                    approvalAskedFor = key
+                    approvalRequest = request
+                }
+            } else {
+                approvalRequest = nil
+            }
             Task { await refreshHistory(state: newState) }
             Task { await ensureOwnProfile(state: newState) }
+        }
+        .alert(
+            "Pair with \(approvalRequest?.fullName ?? "them")?",
+            isPresented: Binding(get: { approvalRequest != nil }, set: { if !$0 { approvalRequest = nil } }),
+            presenting: approvalRequest
+        ) { request in
+            Button("Approve") { Task { await approve(request) } }
+            Button("Decline", role: .destructive) { Task { await decline() } }
+            Button("Not now", role: .cancel) {}
+        } message: { request in
+            Text("\(request.displayName) asked to join with your code. Only approve if this is your partner.")
         }
         .task(id: arrivalWatchKey) {
             await askWhenCountdownEnds()
@@ -218,7 +248,9 @@ struct CountdownView: View {
                     .accessibilityIdentifier("todayText")
             }
 
-            if let state = sync.state {
+            if let state = sync.state, !state.participantUIDs.contains(uid) {
+                joinRequestStatus(state)
+            } else if let state = sync.state {
                 // What the partner sees when you tap "thinking of you":
                 // it used to be sent and never shown anywhere.
                 if let newest = pings.unseen.first {
@@ -232,6 +264,9 @@ struct CountdownView: View {
                         },
                         onDismiss: { try await pings.markAllSeen() }
                     )
+                }
+                if state.participantUIDs.count < 2, let request = state.joinRequest {
+                    approvalCard(request)
                 }
                 if state.participantUIDs.count < 2 {
                     waitingForPartnerCard
@@ -341,6 +376,116 @@ struct CountdownView: View {
             Button("Keep it", role: .cancel) {}
         } message: {
             Text("Its code will stop working, and you can create a new one or join your partner's.")
+        }
+    }
+
+    /// Someone with the code asked to join: the creator decides. Nobody is
+    /// paired without this, and it shows their full name so it's clearly
+    /// the right person.
+    private func approvalCard(_ request: JoinRequest) -> some View {
+        VStack(spacing: 12) {
+            Text("💌").font(.largeTitle)
+            Text("\(request.fullName) wants to pair with you")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("joinRequestText")
+            Text("Only approve if this is your partner.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button {
+                    Task { await approve(request) }
+                } label: {
+                    Label("Approve", systemImage: "heart.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(theme.accentColor)
+                .accessibilityIdentifier("approveJoinButton")
+                Button("Decline", role: .destructive) {
+                    Task { await decline() }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("declineJoinButton")
+            }
+            if let approvalError {
+                Text(approvalError).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("joinRequestCard")
+    }
+
+    private func approve(_ request: JoinRequest) async {
+        approvalError = nil
+        do {
+            try await firestore.approveJoinRequest(request, coupleId: coupleId)
+        } catch {
+            approvalError = "Couldn't approve. They may have withdrawn the request. If not, check your connection and try again."
+        }
+    }
+
+    private func decline() async {
+        approvalError = nil
+        do {
+            try await firestore.declineJoinRequest(coupleId: coupleId)
+        } catch {
+            approvalError = "Couldn't decline. Check your connection and try again."
+        }
+    }
+
+    /// This account asked to join and it's the creator's turn: waiting, or
+    /// declined. Nothing else of the pairing shows until they approve.
+    @ViewBuilder
+    private func joinRequestStatus(_ state: RelationshipState) -> some View {
+        let creator = state.participantUIDs.first.flatMap { state.partnerProfiles[$0]?.fullName } ?? "your partner"
+        VStack(spacing: 14) {
+            if state.joinRequest?.uid == uid {
+                Text("💌").font(.system(size: 56))
+                Text("Waiting for \(creator) to approve")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("awaitingApprovalText")
+                Text("They'll see your request next time they open CoupleCountdown. You'll be paired as soon as they approve.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Withdraw request", role: .destructive) {
+                    Task { await withdrawRequest() }
+                }
+                .accessibilityIdentifier("withdrawRequestButton")
+            } else {
+                Text("\(creator) didn't approve the request")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("requestDeclinedText")
+                Text("Check the code with your partner, or create your own pairing.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("OK") {
+                    Task { await leaveUnreadablePairing() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(theme.accentColor)
+                .accessibilityIdentifier("requestDeclinedOKButton")
+            }
+            if let leaveError {
+                Text(leaveError).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .padding(.top, 60)
+        .padding(.horizontal)
+    }
+
+    private func withdrawRequest() async {
+        leaveError = nil
+        do {
+            try await firestore.withdrawJoinRequest(coupleId: coupleId, uid: uid)
+        } catch {
+            leaveError = "Couldn't withdraw. Check your connection and try again."
         }
     }
 
@@ -579,6 +724,11 @@ struct CountdownView: View {
         separations.last.flatMap { $0.end == nil ? $0 : nil }
     }
 
+    /// In the pairing, not just asking to join it (true while loading).
+    private var isParticipant: Bool {
+        sync.state?.participantUIDs.contains(uid) ?? true
+    }
+
     /// The other partner's profile (name and time zone), once they've joined.
     private var partnerProfile: PartnerProfile? {
         sync.state?.partnerProfiles.first { $0.key != uid }?.value
@@ -658,7 +808,9 @@ struct CountdownView: View {
     /// Waits for the countdown to run out, then asks, once per meetup on
     /// this device. Also closes the question if the partner answers first.
     private func askWhenCountdownEnds() async {
-        guard let state = sync.state, state.status == .apart, let meetup = state.nextMeetupDate else {
+        guard let state = sync.state, state.participantUIDs.contains(uid),
+              state.status == .apart, let meetup = state.nextMeetupDate
+        else {
             isAskingMetUp = false
             return
         }

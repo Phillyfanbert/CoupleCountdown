@@ -89,10 +89,10 @@ struct JoinPairingView: View {
             isPresented: Binding(get: { preview != nil }, set: { if !$0 { preview = nil } }),
             presenting: preview
         ) { preview in
-            Button("Pair") { Task { await join(preview) } }
+            Button("Pair") { Task { await requestToJoin(preview) } }
             Button("Cancel", role: .cancel) {}
         } message: { preview in
-            Text("Only pair if \(preview.partnerName) is your partner. You'll share one countdown and calendar.")
+            Text("Only pair if \(preview.partnerName) is your partner. They'll be asked to approve, then you'll share one countdown and calendar.")
         }
     }
 
@@ -116,18 +116,21 @@ struct JoinPairingView: View {
             errorMessage = "That code was cancelled. Ask your partner for their current one."
         } catch FirestoreService.JoinPreviewProblem.ownCode {
             errorMessage = "That's your own code. Send it to your partner instead."
+        } catch FirestoreService.JoinPreviewProblem.anotherRequestWaiting {
+            errorMessage = "Someone else is already waiting for approval on that code. Check it with your partner."
         } catch {
             errorMessage = "Couldn't check the code. Check your connection and try again."
         }
         isWorking = false
     }
 
-    private func join(_ preview: FirestoreService.JoinPreview) async {
+    /// Pairing takes both people: this asks, and the creator approves.
+    private func requestToJoin(_ preview: FirestoreService.JoinPreview) async {
         guard let uid = authService.uid else { return }
         errorMessage = nil
         isWorking = true
         do {
-            try await firestore.joinCouple(
+            try await firestore.requestToJoin(
                 coupleId: preview.coupleId,
                 uid: uid,
                 displayName: displayName,
@@ -135,11 +138,12 @@ struct JoinPairingView: View {
                 timeZoneIdentifier: TimeZone.current.identifier,
                 discarding: ownCode
             )
-            // Joining also records the pairing on the account; the account
-            // listener (AccountSessionView) moves every device to the countdown.
+            // The request is recorded on the account too; the account listener
+            // (AccountSessionView) moves every device to "waiting for approval".
         } catch {
-            // The pairing filled up, or was cancelled, between the check and now.
-            errorMessage = "Couldn't join. Check the code with your partner and try again."
+            // The pairing filled up, was cancelled, or someone else asked,
+            // between the check and now.
+            errorMessage = "Couldn't send the request. Check the code with your partner and try again."
         }
         isWorking = false
     }

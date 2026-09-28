@@ -252,6 +252,14 @@ final class PartnerNameTests: XCTestCase {
         XCTAssertEqual(PartnerProfile.fullName(first: " Sam ", last: "  "), "Sam")
     }
 
+    func testJoinRequestNamesTheAskerAndBecomesTheirProfile() throws {
+        let json = #"{"uid": "b", "displayName": "Sam", "lastName": "Lee", "timeZoneIdentifier": "Europe/London"}"#
+        let request = try JSONDecoder().decode(JoinRequest.self, from: Data(json.utf8))
+        XCTAssertEqual(request.fullName, "Sam Lee")
+        XCTAssertEqual(request.profile, PartnerProfile(displayName: "Sam", lastName: "Lee", timeZoneIdentifier: "Europe/London"))
+        XCTAssertNil(request.requestedAt)
+    }
+
     func testOlderCachedProfilesWithoutALastNameStillDecode() throws {
         let json = #"{"displayName": "Sam", "timeZoneIdentifier": "Europe/London"}"#
         let profile = try JSONDecoder().decode(PartnerProfile.self, from: Data(json.utf8))

@@ -76,12 +76,15 @@ the same countdown.
 1. One of you taps **Create a pairing** and shares the code or invite link.
 2. The link opens the web app with the code saved. Your partner creates their
    own account, or signs in if they already have one.
-3. Before anything is paired, they see **"Pair with Alex Smith?"** and
-   confirm, so nobody pairs with the wrong person by a mixed-up code.
+3. They see **"Pair with Alex Smith?"** and confirm, which sends a request.
+4. You see **"Sam Lee wants to pair with you"** and approve it (or decline).
+   Only then are you paired. Nobody can join your pairing without your
+   approval, and each of you sees the other's full name before agreeing.
 
 A code doesn't expire: it keeps working until your partner joins with it or
 you cancel it. If you both tapped Create, either of you can tap **Join theirs
-instead**: that pairs you and discards your own unused code in the same save.
+instead**: that sends the request and discards your own unused code in the
+same save.
 A pairing is always exactly two people, but each of you can use any number of
 devices.
 

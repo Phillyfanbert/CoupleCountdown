@@ -23,7 +23,9 @@ service cloud.firestore {
 
     match /couples/{coupleId} {
       // Readable only by an existing participant, or by anyone (i.e. a
-      // holder of the code) while a slot is still open to join.
+      // holder of the code) while it has a free place: that's how someone
+      // joining sees whose pairing it is, and follows their request while
+      // it waits for the creator's approval.
       allow get: if request.auth != null &&
         (request.auth.uid in resource.data.participantUIDs ||
          resource.data.participantUIDs.size() < 2);
@@ -32,33 +34,70 @@ service cloud.firestore {
       // be looked up by exact ID, never browsed/enumerated.
 
       allow create: if request.auth != null &&
-        request.resource.data.participantUIDs == [request.auth.uid];
+        request.resource.data.participantUIDs == [request.auth.uid] &&
+        !('joinRequest' in request.resource.data);
 
+      function changed() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      function isParticipant() {
+        return request.auth.uid in resource.data.participantUIDs;
+      }
+      function hasRequest() {
+        return resource.data.get('joinRequest', null) != null;
+      }
+      function requestCleared() {
+        return request.resource.data.get('joinRequest', null) == null;
+      }
+
+      // Pairing takes both people: someone with the code *asks* to join
+      // (joinRequest, with their name), and only the creator's approval adds
+      // them. Nobody can add themselves any more, and the creator can only
+      // add the person who actually asked.
       allow update: if request.auth != null && (
-        // Existing participant editing anything EXCEPT participantUIDs:
-        // membership can never be changed by a normal edit, only by
-        // the join path below.
-        (request.auth.uid in resource.data.participantUIDs &&
-         !request.resource.data.diff(resource.data).affectedKeys()
-           .hasAny(['participantUIDs']) &&
-         // Cancelling (setting `closed`) is only for a pairing nobody has
-         // joined yet. Otherwise a creator confirming "cancel" just as
-         // their partner joined would walk away and strand the partner.
-         (!request.resource.data.diff(resource.data).affectedKeys()
-             .hasAny(['closed']) ||
-          resource.data.participantUIDs.size() < 2))
+        // 1. A participant's ordinary edit: anything except membership.
+        //    A join request can only be removed this way (declined), never
+        //    written, so a creator can't fake one to add someone who never
+        //    asked. Cancelling (setting `closed`) is only for a pairing
+        //    nobody has joined yet; otherwise a creator confirming "cancel"
+        //    just as their partner joined would strand the partner.
+        (isParticipant() &&
+         !changed().hasAny(['participantUIDs']) &&
+         (!changed().hasAny(['joinRequest']) || requestCleared()) &&
+         (!changed().hasAny(['closed']) || resource.data.participantUIDs.size() < 2))
         ||
-        // Joining: append self only, only while a slot is open, only
-        // that one field changes, and never into a pairing its creator
-        // cancelled (e.g. after both partners tapped Create), otherwise an
-        // old code would still pair you with someone who has moved on.
-        (resource.data.participantUIDs.size() < 2 &&
-         resource.data.get('closed', false) != true &&
-         !(request.auth.uid in resource.data.participantUIDs) &&
+        // 2. Approving: the creator (the only participant so far) adds
+        //    exactly the person who asked, with their name, and clears the
+        //    request. Nothing else changes in the same write.
+        (isParticipant() &&
+         resource.data.participantUIDs.size() == 1 &&
+         hasRequest() &&
          request.resource.data.participantUIDs ==
-           resource.data.participantUIDs.concat([request.auth.uid]) &&
-         request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['participantUIDs']))
+           resource.data.participantUIDs.concat([resource.data.joinRequest.uid]) &&
+         requestCleared() &&
+         changed().hasOnly(['participantUIDs', 'partnerProfiles', 'joinRequest']))
+        ||
+        // 3. Asking to join: someone with the code, not in it, while it has
+        //    a free place, isn't cancelled (an old code mustn't pair you with
+        //    someone who has moved on), and nobody else is already waiting.
+        //    Only the request changes, and it's in the asker's own name.
+        (!isParticipant() &&
+         resource.data.participantUIDs.size() < 2 &&
+         resource.data.get('closed', false) != true &&
+         changed().hasOnly(['joinRequest']) &&
+         request.resource.data.joinRequest.uid == request.auth.uid &&
+         request.resource.data.joinRequest.keys()
+           .hasOnly(['uid', 'displayName', 'lastName', 'timeZoneIdentifier', 'requestedAt']) &&
+         request.resource.data.joinRequest.displayName is string &&
+         request.resource.data.joinRequest.displayName.size() <= 60 &&
+         (!hasRequest() || resource.data.joinRequest.uid == request.auth.uid))
+        ||
+        // 4. Withdrawing your own request.
+        (!isParticipant() &&
+         hasRequest() &&
+         resource.data.joinRequest.uid == request.auth.uid &&
+         changed().hasOnly(['joinRequest']) &&
+         requestCleared())
       );
 
       allow delete: if false; // no deletes in v1

@@ -82,67 +82,47 @@ export function makeApi(db, uid) {
     },
 
     /**
-     * Joins an existing couple. Two writes, because the rules' join path only
-     * permits a couple-doc write that touches exactly participantUIDs.
-     *
-     * The account record goes in the *first* batch, with the join itself (a
-     * different document, so the join rule still holds). It used to be in the
-     * second: if that failed, the joiner was in the pairing but their account
-     * never knew, and retrying Join was refused (already a participant): stuck
-     * for good. Now a failed second write only leaves the name missing, which
-     * ensurePartnerProfile fills in the next time the countdown loads.
+     * Asks to join a partner's pairing. Pairing takes both people: the request
+     * (with this person's name) goes on the couple doc for the creator to
+     * approve, and only their approval adds this person. In the same batch the
+     * account points at the pairing, so every device on it shows the wait, and
+     * `discarding` (this person's own unused code, when both of them tapped
+     * Create) is closed, so it can never be joined afterwards.
      */
-    /**
-     * Whose pairing a code belongs to, for the "Pair with Alex Smith?"
-     * confirmation before joining. Resolves { partnerName } or rejects with
-     * an Error whose `problem` is "notFound" (no such code, or already two
-     * people: the rules can't tell those apart to an outsider), "cancelled",
-     * or "ownCode".
-     */
-    async joinPreview(coupleId) {
-      const fail = (problem) => Object.assign(new Error(problem), { problem });
-      let snap;
-      try {
-        snap = await getDoc(coupleRef(coupleId));
-      } catch (e) {
-        if (e.code === "permission-denied") throw fail("notFound");
-        throw e;
-      }
-      if (!snap.exists()) throw fail("notFound");
-      const d = snap.data();
-      if (d.closed === true) throw fail("cancelled");
-      const participants = d.participantUIDs || [];
-      if (participants.includes(uid)) throw fail("ownCode");
-      if (participants.length >= 2) throw fail("notFound");
-      const owner = d.partnerProfiles?.[participants[0]];
-      return { coupleId, partnerName: owner ? fullName(owner.displayName, owner.lastName) : "your partner" };
+    async requestToJoin(coupleId, displayName, lastName, timeZone, discarding = null) {
+      const batch = writeBatch(db);
+      batch.update(coupleRef(coupleId), {
+        joinRequest: { uid, displayName, ...(lastName ? { lastName } : {}), timeZoneIdentifier: timeZone, requestedAt: Timestamp.now() },
+      });
+      batch.set(userRef(), { displayName, ...(lastName ? { lastName } : {}), coupleId }, { merge: true });
+      if (discarding && discarding !== coupleId) batch.update(coupleRef(discarding), { closed: true });
+      await batch.commit();
+    },
+
+    /** Takes back a request that's still waiting, and detaches the account. */
+    async withdrawJoinRequest(coupleId) {
+      const batch = writeBatch(db);
+      batch.update(coupleRef(coupleId), { joinRequest: deleteField() });
+      batch.set(userRef(), { coupleId: deleteField() }, { merge: true });
+      await batch.commit();
     },
 
     /**
-     * Joins an existing couple. Two writes, because the rules' join path only
-     * permits a couple-doc write that touches exactly participantUIDs.
-     *
-     * The account record goes in the *first* batch, with the join itself (a
-     * different document, so the join rule still holds). It used to be in the
-     * second: if that failed, the joiner was in the pairing but their account
-     * never knew, and retrying Join was refused (already a participant), so
-     * they were stuck for good. Now a failed second write only leaves the name
-     * missing, which ensurePartnerProfile fills in the next time the countdown
-     * loads.
-     *
-     * `discarding` is this person's own unused code (both of them tapped
-     * Create): it's closed in the same batch, so joining the partner's
-     * discards it and it can never be joined afterwards.
+     * The creator approves: the person who asked joins, with their name. The
+     * rules only allow adding the uid on the current request, so a stale
+     * screen can't approve someone who has since withdrawn.
      */
-    async joinCouple(coupleId, displayName, lastName, timeZone, discarding = null) {
-      const join = writeBatch(db);
-      join.update(coupleRef(coupleId), { participantUIDs: arrayUnion(uid) });
-      join.set(userRef(), { displayName, ...(lastName ? { lastName } : {}), coupleId }, { merge: true });
-      if (discarding && discarding !== coupleId) join.update(coupleRef(discarding), { closed: true });
-      await join.commit();
+    async approveJoinRequest(coupleId, request) {
       await updateDoc(coupleRef(coupleId), {
-        [`partnerProfiles.${uid}`]: profileFields(displayName, lastName, timeZone),
+        participantUIDs: arrayUnion(request.uid),
+        [`partnerProfiles.${request.uid}`]: profileFields(request.displayName, request.lastName, request.timeZoneIdentifier),
+        joinRequest: deleteField(),
       });
+    },
+
+    /** The creator declines: the request goes, and the code stays open. */
+    async declineJoinRequest(coupleId) {
+      await updateDoc(coupleRef(coupleId), { joinRequest: deleteField() });
     },
 
     /** Fills in this person's name/time zone on the couple doc if it's missing. */

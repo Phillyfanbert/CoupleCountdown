@@ -121,6 +121,8 @@ final class FirestoreService {
         case cancelled
         /// The code is this account's own.
         case ownCode
+        /// Someone else's request is already waiting for the creator.
+        case anotherRequestWaiting
     }
 
     func joinPreview(coupleId: String, uid: String) async throws -> JoinPreview {
@@ -136,27 +138,18 @@ final class FirestoreService {
         if snapshot.get("closed") as? Bool == true { throw JoinPreviewProblem.cancelled }
         if state.participantUIDs.contains(uid) { throw JoinPreviewProblem.ownCode }
         guard state.participantUIDs.count < 2 else { throw JoinPreviewProblem.notFound }
+        if let waiting = state.joinRequest, waiting.uid != uid { throw JoinPreviewProblem.anotherRequestWaiting }
         let owner = state.participantUIDs.first.flatMap { state.partnerProfiles[$0] }
         return JoinPreview(coupleId: coupleId, partnerName: owner?.fullName ?? "your partner")
     }
 
-    /// Joins an existing couple doc. Two writes, because the rules' join
-    /// path only allows a couple-doc write that touches *exactly*
-    /// participantUIDs (firebase/test/rules.test.js "join while open").
-    ///
-    /// The account record is written in the *first* batch, alongside the
-    /// join itself (a different document, so the join rule still holds).
-    /// It used to be in the second: if that one failed, the joiner was in
-    /// the pairing but their account never knew, and retrying Join was
-    /// refused because they were already a participant, so they were stuck
-    /// for good. Now the second write only adds the name/time zone; if it
-    /// fails, `ensurePartnerProfile` fills the profile in the next time the
-    /// countdown loads.
-    ///
-    /// `discarding` is this person's own unused code (both of them tapped
-    /// Create): it's closed in the same batch, so joining the partner's
-    /// discards it, and it can never be joined afterwards.
-    func joinCouple(
+    /// Asks to join a partner's pairing. Pairing takes both people: the
+    /// request (with this person's name) goes on the couple doc for the
+    /// creator to approve; only their approval adds this person. In the same
+    /// batch the account points at the pairing, so every device on it shows
+    /// the wait, and `discarding` (this person's own unused code, when both
+    /// of them tapped Create) is closed, so it can never be joined afterwards.
+    func requestToJoin(
         coupleId: String,
         uid: String,
         displayName: String,
@@ -164,19 +157,50 @@ final class FirestoreService {
         timeZoneIdentifier: String,
         discarding ownCode: String? = nil
     ) async throws {
-        let join = db.batch()
-        join.updateData(["participantUIDs": FieldValue.arrayUnion([uid])], forDocument: coupleRef(coupleId))
+        let batch = db.batch()
+        var request: [String: Any] = [
+            "uid": uid,
+            "displayName": displayName,
+            "timeZoneIdentifier": timeZoneIdentifier,
+            "requestedAt": Timestamp(date: Date()),
+        ]
+        if let lastName, !lastName.isEmpty { request["lastName"] = lastName }
+        batch.updateData(["joinRequest": request], forDocument: coupleRef(coupleId))
         var account: [String: Any] = ["displayName": displayName, "coupleId": coupleId]
         if let lastName { account["lastName"] = lastName }
-        join.setData(account, forDocument: userRef(uid), merge: true)
+        batch.setData(account, forDocument: userRef(uid), merge: true)
         if let ownCode, ownCode != coupleId {
-            join.updateData(["closed": true], forDocument: coupleRef(ownCode))
+            batch.updateData(["closed": true], forDocument: coupleRef(ownCode))
         }
-        try await join.commit()
+        try await batch.commit()
+    }
 
+    /// Takes back a request that's still waiting, and detaches the account.
+    func withdrawJoinRequest(coupleId: String, uid: String) async throws {
+        let batch = db.batch()
+        batch.updateData(["joinRequest": FieldValue.delete()], forDocument: coupleRef(coupleId))
+        batch.setData(["coupleId": FieldValue.delete()], forDocument: userRef(uid), merge: true)
+        try await batch.commit()
+    }
+
+    /// The creator approves: the person who asked joins, with their name.
+    /// The rules only allow adding the uid on the current request, so a stale
+    /// screen can't approve someone who has since withdrawn.
+    func approveJoinRequest(_ request: JoinRequest, coupleId: String) async throws {
         try await coupleRef(coupleId).updateData([
-            "partnerProfiles.\(uid)": Self.profileFields(displayName: displayName, lastName: lastName, timeZoneIdentifier: timeZoneIdentifier),
+            "participantUIDs": FieldValue.arrayUnion([request.uid]),
+            "partnerProfiles.\(request.uid)": Self.profileFields(
+                displayName: request.displayName,
+                lastName: request.lastName,
+                timeZoneIdentifier: request.timeZoneIdentifier
+            ),
+            "joinRequest": FieldValue.delete(),
         ])
+    }
+
+    /// The creator declines: the request goes, and the code stays open.
+    func declineJoinRequest(coupleId: String) async throws {
+        try await coupleRef(coupleId).updateData(["joinRequest": FieldValue.delete()])
     }
 
     /// Fills in this person's name/time zone on the couple doc if it's

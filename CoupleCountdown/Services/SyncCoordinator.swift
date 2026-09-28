@@ -28,13 +28,17 @@ final class SyncCoordinator: ObservableObject {
     private let firestore: FirestoreService
     private let cache: AppGroupCache
     private let coupleId: String
+    /// Whose device this is: the widget only shows a pairing this person is
+    /// actually in (not one they've only asked to join).
+    private let uid: String
     private let widgetKind: String
     private var listener: ListenerRegistration?
 
-    init(firestore: FirestoreService, cache: AppGroupCache, coupleId: String, widgetKind: String) {
+    init(firestore: FirestoreService, cache: AppGroupCache, coupleId: String, uid: String, widgetKind: String) {
         self.firestore = firestore
         self.cache = cache
         self.coupleId = coupleId
+        self.uid = uid
         self.widgetKind = widgetKind
     }
 
@@ -93,7 +97,11 @@ final class SyncCoordinator: ObservableObject {
     private func publish(_ newState: RelationshipState) {
         state = newState
         loadProblem = nil
-        cache.write(newState)
+        if newState.participantUIDs.contains(uid) {
+            cache.write(newState)
+        } else {
+            cache.clear() // still waiting for approval: nothing to show yet
+        }
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
     }
 }

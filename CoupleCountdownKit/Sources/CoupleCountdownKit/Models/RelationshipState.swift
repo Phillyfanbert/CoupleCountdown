@@ -23,6 +23,9 @@ public struct RelationshipState: Codable, Equatable, Sendable {
     /// the first stretch apart begins, before any together/apart event
     /// exists. Nil for pairings made before it was recorded.
     public var pairedAt: Date?
+    /// Someone with the code asking to join, until the creator approves or
+    /// declines. Pairing takes both of them: nobody joins on their own.
+    public var joinRequest: JoinRequest?
 
     public init(
         status: Status,
@@ -31,7 +34,8 @@ public struct RelationshipState: Codable, Equatable, Sendable {
         partnerProfiles: [String: PartnerProfile],
         lastUpdatedBy: String,
         lastUpdatedAt: Date,
-        pairedAt: Date? = nil
+        pairedAt: Date? = nil,
+        joinRequest: JoinRequest? = nil
     ) {
         self.status = status
         self.nextMeetupDate = nextMeetupDate
@@ -40,5 +44,6 @@ public struct RelationshipState: Codable, Equatable, Sendable {
         self.lastUpdatedBy = lastUpdatedBy
         self.lastUpdatedAt = lastUpdatedAt
         self.pairedAt = pairedAt
+        self.joinRequest = joinRequest
     }
 }

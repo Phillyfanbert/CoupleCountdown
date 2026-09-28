@@ -56,8 +56,10 @@ struct CountdownTimelineProvider: TimelineProvider {
             var unseenPing = state == nil ? nil : cache.readUnseenPing()
             if let coupleId = currentCoupleId, let session = await tokenProvider.fetchSession() {
                 if let fresh = await client.fetchRelationshipState(coupleId: coupleId, session: session) {
-                    state = fresh
-                    cache.write(fresh)
+                    // Only a pairing this person is actually in: not one
+                    // they've asked to join and are waiting on.
+                    state = fresh.participantUIDs.contains(session.uid) ? fresh : nil
+                    if let state { cache.write(state) } else { cache.clear() }
                 }
                 // Without push, the widget is how a partner who hasn't
                 // opened the app finds out someone's thinking of them.
@@ -81,7 +83,7 @@ struct CountdownTimelineProvider: TimelineProvider {
             if let state, state.status == .apart, let meetup = state.nextMeetupDate {
                 dates = CountdownFormatter.widgetTimelineDates(until: meetup, from: now)
             }
-            let entries = dates.map { CountdownEntry(date: $0, state: state, unseenPing: unseenPing) }
+            let entries = dates.map { CountdownEntry(date: $0, state: state, unseenPing: state == nil ? nil : unseenPing) }
             // `.after(~30 min)` is a request, not a guarantee; WidgetKit's
             // actual cadence is still OS-controlled (§5.2 #4), `.never`
             // would starve updates, `.atEnd` risks hammering the refresh

@@ -308,6 +308,10 @@ couples/{coupleId}                      // coupleId is the human-shareable join 
   - codeExpiresAt: Timestamp?           // legacy: earlier builds wrote it; codes
                                         // don't expire (§5.3 step 6), ignored
   - closed: Bool?                       // cancelled before anyone joined (§7.5)
+  - joinRequest: {                      // someone asking to join, until the
+      uid, displayName, lastName?,      // creator approves or declines (§5.3)
+      timeZoneIdentifier, requestedAt
+    }?
   - pairedAt: Timestamp?                // when the pairing was created: the
                                         // start of the first stretch apart (§7.2)
 
@@ -502,7 +506,22 @@ failure mode for that).
      rules allow closing only while nobody has joined). So the unused code
      can never be joined afterwards; it used to take cancelling it first.*
    - *The invite link opens the web app with the code saved. There the
-     partner creates an account or signs in, then confirms.)*
+     partner creates an account or signs in, then confirms.*
+   - *Pairing takes both people. B's confirmation doesn't join: it writes a
+     `joinRequest` (B's uid and full name) on the couple doc, and B's
+     account points at the pairing, so every device of B's shows "Waiting
+     for Alex Smith to approve", with a way to withdraw. The creator sees
+     "Sam Lee wants to pair with you" (a popup once per request, and a card)
+     and approves, which adds B, or declines, which clears the request and
+     leaves the code open. B is then told and returns to Create/Join.*
+   - *The rules enforce it. Nobody can add themselves any more. A request
+     must be in the asker's own name, only while the pairing is open and
+     nobody else is waiting. The creator can only approve the uid on the
+     current request, so a stale screen can't approve someone who withdrew.
+     The creator can remove a request (decline) but never write one, so
+     they can't add someone who never asked. Until approved, the asker can
+     read the couple doc (to follow the request) but nothing inside it, and
+     their widget shows nothing from it.)*
 5. **Security**: enforced entirely by Firestore Security Rules, no Cloud
    Function needed. Once a code is used to pair two participants, it stops
    granting access to anyone else, not just for joining, but for reading:

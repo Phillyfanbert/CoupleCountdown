@@ -12,6 +12,7 @@ const {
 } = require('@firebase/rules-unit-testing');
 const {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -52,7 +53,7 @@ afterEach(async () => {
 
 // Seeds a couple doc directly, bypassing rules: this is setup, not what's
 // under test.
-async function seedCouple(participantUIDs) {
+async function seedCouple(participantUIDs, extra = {}) {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'couples', COUPLE_ID), {
       status: 'apart',
@@ -60,8 +61,14 @@ async function seedCouple(participantUIDs) {
       participantUIDs,
       lastUpdatedBy: participantUIDs[0],
       lastUpdatedAt: new Date(),
+      ...extra,
     });
   });
+}
+
+// A join request as the clients write it.
+function joinRequest(uid, extra = {}) {
+  return { uid, displayName: 'Sam', lastName: 'Lee', timeZoneIdentifier: 'Europe/London', requestedAt: new Date(), ...extra };
 }
 
 function coupleDoc(uid) {
@@ -107,33 +114,85 @@ describe('couples/{coupleId}: create', () => {
   });
 });
 
-describe('couples/{coupleId}: join while open', () => {
-  it('lets a second, different uid append itself when a slot is open', async () => {
+describe('couples/{coupleId}: asking to join, and the creator approving', () => {
+  it('no longer lets anyone add themselves directly (the creator has to approve)', async () => {
     await seedCouple([UID_A]);
-    await assertSucceeds(
-      updateDoc(coupleDoc(UID_B), { participantUIDs: [UID_A, UID_B] })
-    );
+    await assertFails(updateDoc(coupleDoc(UID_B), { participantUIDs: [UID_A, UID_B] }));
   });
 
-  it("lets a joiner record the pairing on their account in the same batch as the join", async () => {
-    // What both clients do, so a failed follow-up write can't leave the
-    // joiner in the pairing with an account that doesn't know it.
+  it('lets someone with the code ask to join, in their own name', async () => {
+    await seedCouple([UID_A]);
+    await assertSucceeds(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B) }));
+  });
+
+  it("records the request on the asker's account in the same batch", async () => {
     await seedCouple([UID_A]);
     const db = testEnv.authenticatedContext(UID_B).firestore();
     const batch = writeBatch(db);
-    batch.update(doc(db, 'couples', COUPLE_ID), { participantUIDs: [UID_A, UID_B] });
-    batch.set(doc(db, 'users', UID_B), { displayName: 'Sam', coupleId: COUPLE_ID }, { merge: true });
+    batch.update(doc(db, 'couples', COUPLE_ID), { joinRequest: joinRequest(UID_B) });
+    batch.set(doc(db, 'users', UID_B), { displayName: 'Sam', lastName: 'Lee', coupleId: COUPLE_ID }, { merge: true });
     await assertSucceeds(batch.commit());
   });
 
-  it('rejects a join write that also touches another field', async () => {
+  it("rejects a request in someone else's name", async () => {
     await seedCouple([UID_A]);
-    await assertFails(
-      updateDoc(coupleDoc(UID_B), {
-        participantUIDs: [UID_A, UID_B],
-        status: 'together', // sneaking in an extra change alongside the join
-      })
-    );
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_C) }));
+  });
+
+  it('rejects a request that also changes another field', async () => {
+    await seedCouple([UID_A]);
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B), status: 'together' }));
+  });
+
+  it('rejects a request with unexpected fields', async () => {
+    await seedCouple([UID_A]);
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B, { isAdmin: true }) }));
+  });
+
+  it('rejects asking while someone else is already waiting', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_C) });
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B) }));
+  });
+
+  it('lets the asker withdraw their own request, and nobody else', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertFails(updateDoc(coupleDoc(UID_C), { joinRequest: deleteField() }));
+    await assertSucceeds(updateDoc(coupleDoc(UID_B), { joinRequest: deleteField() }));
+  });
+
+  it('lets the creator approve exactly the person who asked', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertSucceeds(updateDoc(coupleDoc(UID_A), {
+      participantUIDs: [UID_A, UID_B],
+      [`partnerProfiles.${UID_B}`]: { displayName: 'Sam', lastName: 'Lee', timeZoneIdentifier: 'Europe/London' },
+      joinRequest: deleteField(),
+    }));
+  });
+
+  it('rejects approving someone other than the person who asked', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_C], joinRequest: deleteField() }));
+  });
+
+  it('rejects adding anyone when nobody asked', async () => {
+    await seedCouple([UID_A]);
+    await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_B] }));
+  });
+
+  it('rejects a creator faking a request to add someone who never asked', async () => {
+    await seedCouple([UID_A]);
+    await assertFails(updateDoc(coupleDoc(UID_A), { joinRequest: joinRequest(UID_C) }));
+  });
+
+  it('rejects approving without clearing the request, or while changing other fields', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_B] }));
+    await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_B], joinRequest: deleteField(), status: 'together' }));
+  });
+
+  it('lets the creator decline', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertSucceeds(updateDoc(coupleDoc(UID_A), { joinRequest: deleteField() }));
   });
 
   it('a stranger CAN read the doc while a slot is still open (they hold the code)', async () => {
@@ -153,12 +212,9 @@ describe('couples/{coupleId}: cancelled pairing', () => {
     await assertFails(updateDoc(coupleDoc(UID_A), { closed: true }));
   });
 
-  it('rejects joining a pairing its creator cancelled', async () => {
-    await seedCouple([UID_A]);
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await updateDoc(doc(ctx.firestore(), 'couples', COUPLE_ID), { closed: true });
-    });
-    await assertFails(updateDoc(coupleDoc(UID_B), { participantUIDs: [UID_A, UID_B] }));
+  it('rejects asking to join a pairing its creator cancelled', async () => {
+    await seedCouple([UID_A], { closed: true });
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B) }));
   });
 });
 
@@ -168,6 +224,7 @@ describe('couples/{coupleId}: join while full', () => {
     await assertFails(
       updateDoc(coupleDoc(UID_C), { participantUIDs: [UID_A, UID_B, UID_C] })
     );
+    await assertFails(updateDoc(coupleDoc(UID_C), { joinRequest: joinRequest(UID_C) }));
   });
 });
 
@@ -292,7 +349,7 @@ describe('couples/{coupleId}: time tracking writes', () => {
   });
 });
 
-describe('couples/{coupleId}: joining a partner discards your own unused code', () => {
+describe('couples/{coupleId}: asking to join a partner discards your own unused code', () => {
   const OWN = 'OWNC0D';
 
   async function seedOwn(participantUIDs) {
@@ -306,13 +363,13 @@ describe('couples/{coupleId}: joining a partner discards your own unused code', 
   function joinAndDiscard(uid) {
     const db = testEnv.authenticatedContext(uid).firestore();
     const batch = writeBatch(db);
-    batch.update(doc(db, 'couples', COUPLE_ID), { participantUIDs: [UID_A, uid] });
+    batch.update(doc(db, 'couples', COUPLE_ID), { joinRequest: joinRequest(uid) });
     batch.set(doc(db, 'users', uid), { displayName: 'Sam', lastName: 'Lee', coupleId: COUPLE_ID }, { merge: true });
     batch.update(doc(db, 'couples', OWN), { closed: true });
     return batch.commit();
   }
 
-  it('joins the partner and closes your own open code in one batch', async () => {
+  it('asks to join the partner and closes your own open code in one batch', async () => {
     await seedCouple([UID_A]);
     await seedOwn([UID_B]);
     await assertSucceeds(joinAndDiscard(UID_B));

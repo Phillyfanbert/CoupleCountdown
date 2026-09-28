@@ -98,6 +98,8 @@ const S = {
   history: { separations: [], loaded: false },
   zoneSynced: false, // this session already brought our time zone up to date
   metUpClose: null, // closes the "have you met up?" popup, while it's open
+  approvalAskedFor: null, // the join request the creator was last asked about
+  approvalClose: null, // closes the creator's "Pair with …?" popup, while it's open
   busy: false,
   creating: false,
   createError: null,
@@ -494,22 +496,24 @@ function joinForm({ initialCode = "", discarding = null, onJoined = () => {} } =
         notFound: "There's no open pairing with that code. Check it with your partner.",
         cancelled: "That code was cancelled. Ask your partner for their current one.",
         ownCode: "That's your own code. Send it to your partner instead.",
+        anotherRequestWaiting: "Someone else is already waiting for approval on that code. Check it with your partner.",
       }[e.problem] ?? friendly(e, "Couldn't check the code. Check your connection and try again."));
     }
     const close = openModal(`Pair with ${preview.partnerName}?`, "Confirm pairing",
-      h("p", { id: "joinConfirmText" }, `Only pair if ${preview.partnerName} is your partner. You'll share one countdown and calendar.`),
+      h("p", { id: "joinConfirmText" }, `Only pair if ${preview.partnerName} is your partner. They'll be asked to approve, then you'll share one countdown and calendar.`),
       h("button", { class: "btn primary", id: "joinConfirmButton", onclick: async (e) => {
         e.target.disabled = true;
         close();
         try {
-          await S.api.joinCouple(preview.coupleId, S.name, S.lastName, timeZone(), discarding);
+          // Pairing takes both people: this asks, and the creator approves.
+          await S.api.requestToJoin(preview.coupleId, S.name, S.lastName, timeZone(), discarding);
           S.prefillCode = "";
           onJoined();
-          // The account record now has the coupleId; its listener takes it from here.
+          // The account record now points at the pairing; its listener shows the wait.
         } catch (err) {
-          console.error("joinCouple failed", err);
-          // The pairing filled up or was cancelled between the check and now.
-          showError(friendly(err, "Couldn't join. Check the code with your partner and try again."));
+          console.error("requestToJoin failed", err);
+          // The pairing filled up, was cancelled, or someone else asked, between the check and now.
+          showError(friendly(err, "Couldn't send the request. Check the code with your partner and try again."));
         }
       } }, "💞 Pair"),
       h("button", { class: "btn link", onclick: () => { close(); go.disabled = false; } }, "Cancel"));
@@ -561,7 +565,9 @@ function listen() {
           participantUIDs: d.participantUIDs || [],
           partnerProfiles: d.partnerProfiles || {},
           pairedAt: d.pairedAt?.toDate?.() ?? null,
+          joinRequest: d.joinRequest ?? null,
         };
+        askCreatorToApprove();
         S.loadError = null;
         ensureOwnProfile();
         if (!S.zoneSynced) {
@@ -694,7 +700,11 @@ function renderTab() {
   const content = document.getElementById("content");
   if (!content) return;
   const views = { home: homeView, calendar: calendarView, stats: statsView, settings: settingsView };
-  content.replaceChildren(views[S.tab]());
+  // Still waiting for approval: the calendar and stats aren't readable yet.
+  const waiting = S.couple && !isParticipant(S.couple) && (S.tab === "calendar" || S.tab === "stats");
+  content.replaceChildren(waiting
+    ? h("div", { class: "card center" }, h("p", { class: "muted" }, "This opens once your partner approves your request."))
+    : views[S.tab]());
   tick();
 }
 
@@ -705,6 +715,7 @@ function homeView() {
   }
   const c = S.couple;
   if (!c) return h("div", { class: "card center" }, h("p", { class: "muted" }, "Loading…"));
+  if (!isParticipant(c)) return joinRequestStatus(c);
 
   const together = c.status === "together";
   const main = [];
@@ -713,6 +724,7 @@ function homeView() {
   main.push(h("p", { class: "today muted", id: "todayText" }, todayLabel()));
 
   if (S.pings.unseen.length) main.push(pingCard(c));
+  if (c.participantUIDs.length < 2 && c.joinRequest) main.push(approvalCard(c.joinRequest));
   if (c.participantUIDs.length < 2) main.push(waitingCard());
 
   main.push(countdownCard(c));
@@ -1309,6 +1321,94 @@ function settingsView() {
         ? `Paired with ${partner}. Sign in with this account on any phone or computer to see the same countdown.`
         : "Sign in with this account on any phone or computer to see the same countdown."),
       signOutButton()));
+}
+
+// ---------- pairing approval ----------
+const isParticipant = (c) => c.participantUIDs.includes(S.user?.uid);
+const creatorName = (c) => {
+  const creator = c.partnerProfiles[c.participantUIDs[0]];
+  return creator ? fullName(creator.displayName, creator.lastName) : "your partner";
+};
+
+/** Someone with the code asked to join: the creator decides, seeing their full name. */
+function approvalCard(request) {
+  const name = fullName(request.displayName, request.lastName);
+  const error = h("p", { class: "error", hidden: true });
+  const act = (fn, failText) => async () => {
+    try {
+      await fn();
+    } catch (e) {
+      console.error("approval action failed", e);
+      error.textContent = failText;
+      error.hidden = false;
+    }
+  };
+  return h("div", { class: "card stack center-text", id: "joinRequestCard" },
+    h("div", { class: "empty-big" }, "💌"),
+    h("h2", { id: "joinRequestText" }, `${name} wants to pair with you`),
+    h("p", { class: "muted small" }, "Only approve if this is your partner."),
+    h("div", { class: "row" },
+      h("button", { class: "btn primary", id: "approveJoinButton", onclick: act(() => approve(request),
+        "Couldn't approve. They may have withdrawn the request. If not, check your connection and try again.") }, "💞 Approve"),
+      h("button", { class: "btn", id: "declineJoinButton", onclick: act(() => decline(),
+        "Couldn't decline. Check your connection and try again.") }, "Decline")),
+    error);
+}
+
+async function approve(request) {
+  closeApprovalQuestion();
+  await S.api.approveJoinRequest(S.coupleId, request);
+}
+
+async function decline() {
+  closeApprovalQuestion();
+  await S.api.declineJoinRequest(S.coupleId);
+}
+
+/** Pops the "Pair with Sam Lee?" question for the creator, once per request. */
+function askCreatorToApprove() {
+  const c = S.couple;
+  const request = c && c.participantUIDs.length === 1 && isParticipant(c) ? c.joinRequest : null;
+  if (!request) return closeApprovalQuestion();
+  const key = `${request.uid}-${request.requestedAt?.toMillis?.() ?? ""}`;
+  if (S.approvalAskedFor === key) return;
+  S.approvalAskedFor = key;
+  const name = fullName(request.displayName, request.lastName);
+  S.approvalClose = openModal(`Pair with ${name}?`, "Approve pairing",
+    h("p", {}, `${request.displayName} asked to join with your code. Only approve if this is your partner.`),
+    h("button", { class: "btn primary", id: "approveJoinModalButton", onclick: () => approve(request).catch((e) => console.error(e)) }, "💞 Approve"),
+    h("button", { class: "btn", id: "declineJoinModalButton", onclick: () => decline().catch((e) => console.error(e)) }, "Decline"),
+    h("button", { class: "btn link", onclick: () => closeApprovalQuestion() }, "Not now"));
+}
+
+function closeApprovalQuestion() {
+  S.approvalClose?.();
+  S.approvalClose = null;
+}
+
+/** This account asked to join and it's the creator's turn: waiting, or declined. */
+function joinRequestStatus(c) {
+  const error = h("p", { class: "error", hidden: true });
+  const fail = (text) => (e) => {
+    console.error(e);
+    error.textContent = text;
+    error.hidden = false;
+  };
+  if (c.joinRequest?.uid === S.user?.uid) {
+    return h("div", { class: "card stack center-text", id: "awaitingApprovalCard" },
+      h("div", { class: "empty-big" }, "💌"),
+      h("h2", { id: "awaitingApprovalText" }, `Waiting for ${creatorName(c)} to approve`),
+      h("p", { class: "muted" }, "They'll see your request next time they open CoupleCountdown. You'll be paired as soon as they approve."),
+      h("button", { class: "btn", id: "withdrawRequestButton", onclick: () =>
+        S.api.withdrawJoinRequest(S.coupleId).catch(fail("Couldn't withdraw. Check your connection and try again.")) }, "Withdraw request"),
+      error);
+  }
+  return h("div", { class: "card stack center-text", id: "requestDeclinedCard" },
+    h("h2", { id: "requestDeclinedText" }, `${creatorName(c)} didn't approve the request`),
+    h("p", { class: "muted" }, "Check the code with your partner, or create your own pairing."),
+    h("button", { class: "btn primary", id: "requestDeclinedOKButton", onclick: () =>
+      S.api.forgetPairing().catch(fail("Couldn't update. Check your connection and try again.")) }, "OK"),
+    error);
 }
 
 function waitingCard() {
