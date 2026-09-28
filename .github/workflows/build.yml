@@ -278,7 +278,7 @@ jobs:
           set -e -o pipefail
           for tz in UTC America/Los_Angeles America/New_York Asia/Tokyo Pacific/Auckland; do
             echo "== TZ=$tz"
-            TZ=$tz node --test --test-reporter=spec web/logic.test.js | tee web-test.log
+            TZ=$tz node --test --test-reporter=spec web/logic.test.js web/api.test.js | tee web-test.log
             # Exits 0 when no tests run, too: require that they did.
             grep -q "ℹ tests [1-9]" web-test.log || { echo "::error::No web tests ran"; exit 1; }
           done

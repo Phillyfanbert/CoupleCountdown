@@ -82,6 +82,33 @@ export function makeApi(db, uid) {
     },
 
     /**
+     * Whose pairing a code belongs to, for the "Pair with Alex Smith?"
+     * confirmation before joining. Resolves { partnerName } or rejects with
+     * an Error whose `problem` is "notFound" (no such code, or already two
+     * people: the rules can't tell those apart to an outsider), "cancelled",
+     * "ownCode", or "anotherRequestWaiting".
+     */
+    async joinPreview(coupleId) {
+      const fail = (problem) => Object.assign(new Error(problem), { problem });
+      let snap;
+      try {
+        snap = await getDoc(coupleRef(coupleId));
+      } catch (e) {
+        if (e.code === "permission-denied") throw fail("notFound");
+        throw e;
+      }
+      if (!snap.exists()) throw fail("notFound");
+      const d = snap.data();
+      if (d.closed === true) throw fail("cancelled");
+      const participants = d.participantUIDs || [];
+      if (participants.includes(uid)) throw fail("ownCode");
+      if (participants.length >= 2) throw fail("notFound");
+      if (d.joinRequest && d.joinRequest.uid !== uid) throw fail("anotherRequestWaiting");
+      const owner = d.partnerProfiles?.[participants[0]];
+      return { coupleId, partnerName: owner ? fullName(owner.displayName, owner.lastName) : "your partner" };
+    },
+
+    /**
      * Asks to join a partner's pairing. Pairing takes both people: the request
      * (with this person's name) goes on the couple doc for the creator to
      * approve, and only their approval adds this person. In the same batch the
