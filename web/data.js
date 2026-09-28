@@ -39,6 +39,15 @@ export function normalizeCode(input) {
   return input.trim().toUpperCase();
 }
 
+/**
+ * Closing a code (cancel, or discard when asking to join someone else) also
+ * clears any request waiting on it: left behind, the person who asked sat on
+ * "Waiting for … to approve" for good.
+ */
+function closing() {
+  return { closed: true, joinRequest: deleteField() };
+}
+
 /** A partner's entry on the couple doc: first name, last name (if any), time zone. */
 function profileFields(displayName, lastName, timeZone) {
   return { displayName, ...(lastName ? { lastName } : {}), timeZoneIdentifier: timeZone };
@@ -122,7 +131,7 @@ export function makeApi(db, uid) {
         joinRequest: { uid, displayName, ...(lastName ? { lastName } : {}), timeZoneIdentifier: timeZone, requestedAt: Timestamp.now() },
       });
       batch.set(userRef(), { displayName, ...(lastName ? { lastName } : {}), coupleId }, { merge: true });
-      if (discarding && discarding !== coupleId) batch.update(coupleRef(discarding), { closed: true });
+      if (discarding && discarding !== coupleId) batch.update(coupleRef(discarding), closing());
       await batch.commit();
     },
 
@@ -166,7 +175,7 @@ export function makeApi(db, uid) {
      */
     async cancelPairing(coupleId) {
       const batch = writeBatch(db);
-      batch.update(coupleRef(coupleId), { closed: true });
+      batch.update(coupleRef(coupleId), closing());
       batch.set(userRef(), { coupleId: deleteField() }, { merge: true });
       await batch.commit();
     },

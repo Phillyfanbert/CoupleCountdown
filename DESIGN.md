@@ -521,7 +521,14 @@ failure mode for that).
      The creator can remove a request (decline) but never write one, so
      they can't add someone who never asked. Until approved, the asker can
      read the couple doc (to follow the request) but nothing inside it, and
-     their widget shows nothing from it.)*
+     their widget shows nothing from it.*
+   - *Found in a later bug hunt and fixed: closing a code (cancelling it, or
+     discarding it by asking to join someone else) now also clears any
+     request waiting on it, so the asker is told it was cancelled instead of
+     waiting forever. Approving is refused on a cancelled pairing. The
+     asker's ping listener and web plans restart on approval, since both
+     were refused while waiting and a refused Firestore listener never
+     recovers.)*
 5. **Security**: enforced entirely by Firestore Security Rules, no Cloud
    Function needed. Once a code is used to pair two participants, it stops
    granting access to anyone else, not just for joining, but for reading:

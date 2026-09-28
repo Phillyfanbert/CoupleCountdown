@@ -71,6 +71,7 @@ service cloud.firestore {
         //    request. Nothing else changes in the same write.
         (isParticipant() &&
          resource.data.participantUIDs.size() == 1 &&
+         resource.data.get('closed', false) != true &&
          hasRequest() &&
          request.resource.data.participantUIDs ==
            resource.data.participantUIDs.concat([resource.data.joinRequest.uid]) &&
@@ -90,6 +91,9 @@ service cloud.firestore {
            .hasOnly(['uid', 'displayName', 'lastName', 'timeZoneIdentifier', 'requestedAt']) &&
          request.resource.data.joinRequest.displayName is string &&
          request.resource.data.joinRequest.displayName.size() <= 60 &&
+         (!('lastName' in request.resource.data.joinRequest) ||
+           (request.resource.data.joinRequest.lastName is string &&
+            request.resource.data.joinRequest.lastName.size() <= 60)) &&
          (!hasRequest() || resource.data.joinRequest.uid == request.auth.uid))
         ||
         // 4. Withdrawing your own request.

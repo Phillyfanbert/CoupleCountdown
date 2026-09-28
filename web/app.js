@@ -555,6 +555,7 @@ function listen() {
       } else {
         const d = snap.data();
         const previousStatus = S.couple?.status;
+        const wasParticipant = S.couple ? isParticipant(S.couple) : true;
         if (previousStatus === "apart" && d.status === "together" && d.lastUpdatedBy !== S.user?.uid) {
           const name = d.partnerProfiles?.[d.lastUpdatedBy]?.displayName || "Your partner";
           celebrate(reunionMessage(name, ongoingApartMs()));
@@ -566,7 +567,15 @@ function listen() {
           partnerProfiles: d.partnerProfiles || {},
           pairedAt: d.pairedAt?.toDate?.() ?? null,
           joinRequest: d.joinRequest ?? null,
+          closed: d.closed === true,
         };
+        // Just approved: the ping listener and the plan load were refused
+        // while this person was only asking (a refused listener never
+        // recovers), so start them again now they can read the pairing.
+        if (!wasParticipant && isParticipant(S.couple)) {
+          listenPings();
+          loadPlan();
+        }
         askCreatorToApprove();
         S.loadError = null;
         ensureOwnProfile();
@@ -1404,7 +1413,7 @@ function joinRequestStatus(c) {
       error);
   }
   return h("div", { class: "card stack center-text", id: "requestDeclinedCard" },
-    h("h2", { id: "requestDeclinedText" }, `${creatorName(c)} didn't approve the request`),
+    h("h2", { id: "requestDeclinedText" }, c.closed ? `${creatorName(c)} cancelled that code` : `${creatorName(c)} didn't approve the request`),
     h("p", { class: "muted" }, "Check the code with your partner, or create your own pairing."),
     h("button", { class: "btn primary", id: "requestDeclinedOKButton", onclick: () =>
       S.api.forgetPairing().catch(fail("Couldn't update. Check your connection and try again.")) }, "OK"),

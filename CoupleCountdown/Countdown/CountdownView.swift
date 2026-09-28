@@ -168,6 +168,12 @@ struct CountdownView: View {
         }
         .onChange(of: sync.state) { oldState, newState in
             guard let newState else { return }
+            // Just approved: the ping listener was refused while this person
+            // was only asking (and a refused listener never recovers), so
+            // start it again now they can read the pairing.
+            if let oldState, !oldState.participantUIDs.contains(uid), newState.participantUIDs.contains(uid) {
+                pings.startListening()
+            }
             // Your partner said you've met: the congratulations reach you too.
             if oldState?.status == .apart, newState.status == .together, newState.lastUpdatedBy != uid {
                 celebrationMessage = CountdownFormatter.reunionMessage(
@@ -457,7 +463,7 @@ struct CountdownView: View {
                 }
                 .accessibilityIdentifier("withdrawRequestButton")
             } else {
-                Text("\(creator) didn't approve the request")
+                Text(state.closed == true ? "\(creator) cancelled that code" : "\(creator) didn't approve the request")
                     .font(.system(.title3, design: .rounded, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("requestDeclinedText")

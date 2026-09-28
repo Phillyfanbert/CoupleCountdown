@@ -190,6 +190,22 @@ describe('couples/{coupleId}: asking to join, and the creator approving', () => 
     await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_B], joinRequest: deleteField(), status: 'together' }));
   });
 
+  it('clears a waiting request when the creator cancels the code, in the same write', async () => {
+    await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
+    await assertSucceeds(updateDoc(coupleDoc(UID_A), { closed: true, joinRequest: deleteField() }));
+  });
+
+  it('rejects approving on a cancelled pairing', async () => {
+    await seedCouple([UID_A], { closed: true, joinRequest: joinRequest(UID_B) });
+    await assertFails(updateDoc(coupleDoc(UID_A), { participantUIDs: [UID_A, UID_B], joinRequest: deleteField() }));
+  });
+
+  it('rejects a request with a non-string or overlong last name', async () => {
+    await seedCouple([UID_A]);
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B, { lastName: 7 }) }));
+    await assertFails(updateDoc(coupleDoc(UID_B), { joinRequest: joinRequest(UID_B, { lastName: 'x'.repeat(61) }) }));
+  });
+
   it('lets the creator decline', async () => {
     await seedCouple([UID_A], { joinRequest: joinRequest(UID_B) });
     await assertSucceeds(updateDoc(coupleDoc(UID_A), { joinRequest: deleteField() }));
@@ -373,6 +389,21 @@ describe('couples/{coupleId}: asking to join a partner discards your own unused 
     await seedCouple([UID_A]);
     await seedOwn([UID_B]);
     await assertSucceeds(joinAndDiscard(UID_B));
+  });
+
+  it("also clears a request someone left on your own code", async () => {
+    await seedCouple([UID_A]);
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'couples', OWN), {
+        status: 'apart', participantUIDs: [UID_B], partnerProfiles: {}, lastUpdatedBy: UID_B, lastUpdatedAt: new Date(),
+        joinRequest: joinRequest(UID_C),
+      });
+    });
+    const db = testEnv.authenticatedContext(UID_B).firestore();
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'couples', COUPLE_ID), { joinRequest: joinRequest(UID_B) });
+    batch.update(doc(db, 'couples', OWN), { closed: true, joinRequest: deleteField() });
+    await assertSucceeds(batch.commit());
   });
 
   it('refuses the whole batch if your own code already has a partner in it', async () => {

@@ -170,10 +170,14 @@ final class FirestoreService {
         if let lastName { account["lastName"] = lastName }
         batch.setData(account, forDocument: userRef(uid), merge: true)
         if let ownCode, ownCode != coupleId {
-            batch.updateData(["closed": true], forDocument: coupleRef(ownCode))
+            batch.updateData(Self.closing, forDocument: coupleRef(ownCode))
         }
         try await batch.commit()
     }
+
+    /// Closing a code also clears any request waiting on it: left behind, the
+    /// person who asked sat on "Waiting for … to approve" for good.
+    private static let closing: [String: Any] = ["closed": true, "joinRequest": FieldValue.delete()]
 
     /// Takes back a request that's still waiting, and detaches the account.
     func withdrawJoinRequest(coupleId: String, uid: String) async throws {
@@ -223,7 +227,7 @@ final class FirestoreService {
     /// detaches it from the account so the user can create or join another.
     func cancelPairing(coupleId: String, uid: String) async throws {
         let batch = db.batch()
-        batch.updateData(["closed": true], forDocument: coupleRef(coupleId))
+        batch.updateData(Self.closing, forDocument: coupleRef(coupleId))
         batch.setData(["coupleId": FieldValue.delete()], forDocument: userRef(uid), merge: true)
         try await batch.commit()
     }
