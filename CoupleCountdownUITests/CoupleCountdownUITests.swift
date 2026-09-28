@@ -201,6 +201,10 @@ final class CoupleCountdownUITests: XCTestCase {
         let question = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "Pair with")).firstMatch
         XCTAssertTrue(question.waitForExistence(timeout: 30), "The creator should be asked to approve the request", file: file, line: line)
         XCTAssertTrue(question.label.contains(name), "The approval should name \(name), got: \(question.label)", file: file, line: line)
+        // This question arrives right after signing in, just when iOS's own
+        // "Save Password?" sheet does; a CI run caught the sheet covering the
+        // button mid-tap. Deal with the sheet first.
+        declineSavePasswordPrompt(app)
         tapWhenReady(question.buttons[button], in: app, file: file, line: line)
         XCTAssertTrue(
             waitForNonExistence(of: app.descendants(matching: .any)["joinRequestCard"], timeout: 15),

@@ -135,6 +135,10 @@ jobs:
           # hypothetical one.
           set -o pipefail
           mkdir -p logs
+          # A failed test is retried once: iOS's own "Save Password?" sheet
+          # appears at unpredictable moments after sign-in and has covered a
+          # button mid-tap in otherwise-passing runs. A real bug fails both
+          # attempts, and the check below still requires the tests to run.
           # Reuses the simulator already booted above. Each test launches
           # its own app instance with "-uiTestReset" (see
           # CoupleCountdownApp.init()), so tests don't depend on each
@@ -145,14 +149,17 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
+            -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
             | tee logs/uitest-output.log
           # xcodebuild also exits 0 when *no* tests run (say, the test
           # target dropped out of the scheme): another way to go green
-          # having tested nothing. Require that tests really ran and passed.
-          grep -Eq "Executed [1-9][0-9]* tests?, with 0 failures" logs/uitest-output.log \
+          # having tested nothing. Require that tests really ran; pass/fail
+          # itself is xcodebuild's exit status (pipefail above), which also
+          # accounts for a retried test that then passed.
+          grep -Eq "Executed [1-9][0-9]* tests?, with [0-9]+ failures?" logs/uitest-output.log \
             || { echo "::error::No UI tests ran"; exit 1; }
 
       - name: Upload UI test result bundle
