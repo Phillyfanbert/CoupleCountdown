@@ -244,6 +244,13 @@ final class FirestoreService {
     /// Mechanism #2: one-shot fetch on launch/foreground, from the server
     /// rather than the SDK's local cache, so opening the app is always
     /// immediately fresh.
+    /// The couple doc from the server when reachable, otherwise this device's
+    /// copy (which includes its own not-yet-synced changes). For following
+    /// the plan after a change, which mustn't fail just for being offline.
+    func currentCouple(coupleId: String) async throws -> RelationshipState {
+        try await coupleRef(coupleId).getDocument().data(as: RelationshipState.self, with: .estimate)
+    }
+
     func fetchCouple(coupleId: String) async throws -> RelationshipState {
         try await coupleRef(coupleId).getDocument(source: .server).data(as: RelationshipState.self)
     }
@@ -339,23 +346,32 @@ final class FirestoreService {
     /// Sets (or, with nil, clears) the meetup the main countdown and the
     /// widget count down to, without changing the apart/together status:
     /// used when visits are planned or removed.
-    func setNextMeetupDate(_ date: Date?, coupleId: String, uid: String) async throws {
-        try await coupleRef(coupleId).updateData([
+    // Plan writes (the meetup date, visits, important dates) apply on this
+    // device at once and sync when the connection allows, like status
+    // changes: they used to wait for the server, so offline the Save button
+    // spun until reconnecting. `onFailure` hears if the server rejects one.
+
+    func setNextMeetupDate(_ date: Date?, coupleId: String, uid: String, onFailure: @escaping (Error) -> Void) {
+        coupleRef(coupleId).updateData([
             "nextMeetupDate": date.map { Timestamp(date: $0) as Any } ?? FieldValue.delete(),
             "lastUpdatedBy": uid,
             "lastUpdatedAt": FieldValue.serverTimestamp(),
-        ])
+        ]) { error in
+            if let error { onFailure(error) }
+        }
     }
 
     // MARK: - Visits (planned meetups)
 
-    func addVisit(_ visit: Visit, coupleId: String) async throws {
+    func addVisit(_ visit: Visit, coupleId: String, onFailure: @escaping (Error) -> Void) {
         var fields: [String: Any] = [
             "start": Timestamp(date: visit.start),
             "createdBy": visit.createdBy,
         ]
         if let note = visit.note, !note.isEmpty { fields["note"] = note }
-        try await coupleRef(coupleId).collection("visits").document(visit.id).setData(fields)
+        coupleRef(coupleId).collection("visits").document(visit.id).setData(fields) { error in
+            if let error { onFailure(error) }
+        }
     }
 
     func fetchVisits(coupleId: String) async throws -> [Visit] {
@@ -369,23 +385,29 @@ final class FirestoreService {
         }
     }
 
-    func deleteVisit(id: String, coupleId: String) async throws {
-        try await coupleRef(coupleId).collection("visits").document(id).delete()
+    func deleteVisit(id: String, coupleId: String, onFailure: @escaping (Error) -> Void) {
+        coupleRef(coupleId).collection("visits").document(id).delete { error in
+            if let error { onFailure(error) }
+        }
     }
 
     // MARK: - Important dates (§7.4)
 
-    func deleteImportantDate(id: String, coupleId: String) async throws {
-        try await coupleRef(coupleId).collection("importantDates").document(id).delete()
+    func deleteImportantDate(id: String, coupleId: String, onFailure: @escaping (Error) -> Void) {
+        coupleRef(coupleId).collection("importantDates").document(id).delete { error in
+            if let error { onFailure(error) }
+        }
     }
 
-    func addImportantDate(_ date: ImportantDate, coupleId: String) async throws {
-        try await coupleRef(coupleId).collection("importantDates").document(date.id).setData([
+    func addImportantDate(_ date: ImportantDate, coupleId: String, onFailure: @escaping (Error) -> Void) {
+        coupleRef(coupleId).collection("importantDates").document(date.id).setData([
             "label": date.label,
             "date": Timestamp(date: date.date),
             "repeatsAnnually": date.repeatsAnnually,
             "createdBy": date.createdBy,
-        ])
+        ]) { error in
+            if let error { onFailure(error) }
+        }
     }
 
     func fetchImportantDates(coupleId: String) async throws -> [ImportantDate] {

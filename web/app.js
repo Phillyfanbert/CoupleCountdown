@@ -898,9 +898,9 @@ async function confirmTogether() {
     let metEarly = null;
     if (c.nextMeetupDate && c.nextMeetupDate > now) {
       try {
-        metEarly = visitMetEarly(c.nextMeetupDate, await S.api.fetchVisits(S.coupleId), now);
+        metEarly = visitMetEarly(c.nextMeetupDate, await currentVisits(), now);
       } catch (e) {
-        console.error("fetchVisits failed; not moving the visit", e);
+        console.error("couldn't check for an early meetup; not moving the visit", e);
       }
     }
     watchSave(S.api.setStatus(S.coupleId, "together", metEarly ? now : null, metEarly ? { id: metEarly.id, start: now } : null));
@@ -913,7 +913,7 @@ async function confirmTogether() {
 /** Every goodbye is a new trip: count down to the next *planned* visit, or ask for one if nothing is planned. */
 async function leaveAgain() {
   await changeStatus(async () => {
-    const next = nextUpcoming(await S.api.fetchVisits(S.coupleId));
+    const next = nextUpcoming(await currentVisits());
     if (next) watchSave(S.api.setStatus(S.coupleId, "apart", next.start));
     else openVisitModal("leaving");
   });
@@ -1077,17 +1077,10 @@ function openVisitModal(purpose, initial = null) {
       error.hidden = false;
       return;
     }
-    save.disabled = true;
-    error.hidden = true;
-    try {
-      await saveVisit(purpose, picked, note.value.trim());
-      close();
-    } catch (e) {
-      console.error("saveVisit failed", e);
-      error.textContent = "Couldn't save the visit. Check your connection and try again.";
-      error.hidden = false;
-      save.disabled = false;
-    }
+    // Shown at once and synced when the connection allows; a save the
+    // server refuses is reported by watchPlanSave.
+    close();
+    await saveVisit(purpose, picked, note.value.trim());
   } }, "Save");
   const title = purpose === "change" ? "Change the date ✈️" : purpose === "calendar" ? "Plan a visit ✈️" : "When do you see each other next? ✈️";
   const close = openModal(title, "Plan a visit",
@@ -1103,79 +1096,91 @@ function openVisitModal(purpose, initial = null) {
 
 async function saveVisit(purpose, start, note) {
   const current = S.couple?.nextMeetupDate ?? null;
-  const visit = await S.api.addVisit(S.coupleId, { start, note });
-  let visits = await S.api.fetchVisits(S.coupleId);
+  const { visit, saved } = S.api.addVisit(S.coupleId, { start, note });
+  watchPlanSave(saved);
+  let visits = await currentVisits();
+  if (!visits.some((v) => v.id === visit.id)) visits = [...visits, visit];
   if (purpose === "leaving") {
-    await S.api.setStatus(S.coupleId, "apart", nextUpcoming(visits)?.start ?? visit.start);
+    watchSave(S.api.setStatus(S.coupleId, "apart", nextUpcoming(visits)?.start ?? visit.start));
   } else {
     if (purpose === "change" && current) {
       // Replace the visit the countdown pointed at (if it was one).
       const replaced = visits.find((v) => v.id !== visit.id && Math.abs(v.start - current) < 1000);
       if (replaced) {
-        await S.api.deleteVisit(S.coupleId, replaced.id);
+        watchPlanSave(S.api.deleteVisit(S.coupleId, replaced.id));
         visits = visits.filter((v) => v.id !== replaced.id);
       }
     }
     const resolved = resolvedNextMeetup(purpose === "change" ? null : current, visits);
-    if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) await S.api.setNextMeetupDate(S.coupleId, resolved);
+    if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) watchPlanSave(S.api.setNextMeetupDate(S.coupleId, resolved));
   }
-  await loadPlan();
+  showPlan({ visits });
 }
 
-async function deleteVisit(visit) {
+function deleteVisit(visit) {
   if (!confirm("Delete this visit?")) return;
+  watchPlanSave(S.api.deleteVisit(S.coupleId, visit.id));
+  const visits = S.plan.visits.filter((v) => v.id !== visit.id);
+  const current = S.couple?.nextMeetupDate ?? null;
+  const resolved = resolvedNextMeetup(current, visits, visit);
+  if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) watchPlanSave(S.api.setNextMeetupDate(S.coupleId, resolved));
+  showPlan({ visits });
+}
+
+/** The latest visits: the server's when reachable, else the plan already on screen. */
+async function currentVisits() {
   try {
-    await S.api.deleteVisit(S.coupleId, visit.id);
-    const visits = S.plan.visits.filter((v) => v.id !== visit.id);
-    const current = S.couple?.nextMeetupDate ?? null;
-    const resolved = resolvedNextMeetup(current, visits, visit);
-    if ((resolved?.getTime() ?? null) !== (current?.getTime() ?? null)) await S.api.setNextMeetupDate(S.coupleId, resolved);
+    return await S.api.fetchVisits(S.coupleId);
   } catch (e) {
-    console.error("deleteVisit failed", e);
-    alert("Couldn't delete. Check your connection and try again.");
+    console.error("fetchVisits failed; using the plan on screen", e);
+    return S.plan.visits;
   }
-  await loadPlan();
+}
+
+/** Shows a plan change made here at once, without waiting for the server. */
+function showPlan(changes) {
+  S.plan = { ...S.plan, ...changes };
+  if (S.screen === "main" && (S.tab === "home" || S.tab === "calendar")) renderTab();
+}
+
+/**
+ * A plan write (visit, important date, meetup date) that the server refused,
+ * after the screen already showed it: say so, then show what was really saved.
+ */
+function watchPlanSave(saving) {
+  saving.catch((e) => {
+    console.error("plan write failed", e);
+    alert("Couldn't save a change to your plans. Check your connection and try again.");
+    loadPlan();
+  });
 }
 
 function openImportantDateModal(initialDay = null) {
   const label = h("input", { type: "text", id: "dateLabelInput", placeholder: "Label (e.g. Anniversary)", maxlength: "60" });
   const date = h("input", { type: "date", id: "importantDateInput", value: localISODate(initialDay ?? new Date()) });
   const repeats = h("input", { type: "checkbox", id: "repeatsAnnuallyInput", checked: true });
-  const error = h("p", { class: "error", hidden: true });
-  const save = h("button", { class: "btn primary", id: "saveImportantDateButton", disabled: true, onclick: async () => {
+  const save = h("button", { class: "btn primary", id: "saveImportantDateButton", disabled: true, onclick: () => {
     if (!label.value.trim() || !date.value) return;
-    save.disabled = true;
-    error.hidden = true;
-    try {
-      await S.api.addImportantDate(S.coupleId, { label: label.value.trim(), day: parseLocalISODate(date.value), repeatsAnnually: repeats.checked });
-      close();
-      await loadPlan();
-    } catch (e) {
-      console.error("addImportantDate failed", e);
-      error.textContent = "Couldn't save. Check your connection and try again.";
-      error.hidden = false;
-      save.disabled = false;
-    }
+    // Shown at once and synced when the connection allows (see watchPlanSave).
+    const added = S.api.addImportantDate(S.coupleId, { label: label.value.trim(), day: parseLocalISODate(date.value), repeatsAnnually: repeats.checked });
+    watchPlanSave(added.saved);
+    close();
+    showPlan({ dates: [...S.plan.dates, added.date] });
   } }, "Save");
   label.addEventListener("input", () => { save.disabled = !label.value.trim(); });
   const close = openModal("Add an important date 🎁", "Add an important date",
     label,
     h("label", { class: "field" }, "Date", date),
     h("label", { class: "check" }, repeats, "Repeats every year"),
-    error, save,
+    save,
     h("button", { class: "btn link", onclick: () => close() }, "Cancel"));
   label.focus();
 }
 
-async function deleteImportantDate(item) {
+function deleteImportantDate(item) {
   if (!confirm(`Delete “${item.label}”?`)) return;
-  try {
-    await S.api.deleteImportantDate(S.coupleId, item.id);
-  } catch (e) {
-    console.error("deleteImportantDate failed", e);
-    alert("Couldn't delete. Check your connection and try again.");
-  }
-  await loadPlan();
+  watchPlanSave(S.api.deleteImportantDate(S.coupleId, item.id));
+  showPlan({ dates: S.plan.dates.filter((d) => d.id !== item.id) });
 }
 
 // ---------- plan: agenda + calendar ----------
@@ -1319,9 +1324,11 @@ function settingsView() {
   const current = store.get("theme") || "blush";
   const swatches = THEMES.map((t) => h("button", { class: "swatch", id: `theme_${t.id}`, "aria-pressed": String(t.id === current), onclick: () => { applyTheme(t.id); renderTab(); } },
     h("span", { class: "dot", style: `background:${t.color}` }), `${t.emoji} ${t.name}`, t.id === current ? h("span", { style: "margin-left:auto" }, "✓") : null));
-  const partner = S.couple
-    ? Object.entries(S.couple.partnerProfiles).find(([uid]) => uid !== S.user?.uid)?.[1]?.displayName
-    : null;
+  // Only once actually paired: while a request waits for approval, the only
+  // other profile on the code is its creator, not a partner yet.
+  const c = S.couple;
+  const partnerUid = c && isParticipant(c) ? c.participantUIDs.find((uid) => uid !== S.user?.uid) : null;
+  const partner = partnerUid ? c.partnerProfiles[partnerUid]?.displayName : null;
   return h("div", {},
     h("div", { class: "card stack" }, h("h2", {}, "Theme"), h("p", { class: "muted small" }, "Saved on this device."), h("div", { class: "swatches" }, swatches)),
     h("div", { class: "card stack" }, h("h2", {}, "Account"),

@@ -27,7 +27,6 @@ struct CalendarScreen: View {
     @State private var selectedDay: Date?
     @State private var isShowingAddDate = false
     @State private var isShowingPlanVisit = false
-    @State private var visitError: String?
 
     @AppStorage("selectedTheme", store: UserDefaults(suiteName: SharedIdentifiers.appGroup))
     private var selectedThemeRaw: String = CoupleTheme.blush.rawValue
@@ -140,7 +139,6 @@ struct CalendarScreen: View {
             Section {
                 HStack(spacing: 12) {
                     Button {
-                        visitError = nil
                         isShowingPlanVisit = true
                     } label: {
                         Label("Plan a visit", systemImage: "airplane")
@@ -181,16 +179,16 @@ struct CalendarScreen: View {
         .tint(theme.accentColor)
         .navigationTitle("📅 Calendar")
         .sheet(isPresented: $isShowingAddDate) {
-            AddImportantDateView(coupleId: coupleId) {
+            AddImportantDateView(coupleId: coupleId, onSaved: {
                 Task { await load() }
-            }
+            }, onFailed: { saveFailed() })
         }
         .sheet(isPresented: $isShowingPlanVisit) {
             VisitPlannerSheet(
                 title: "Plan a visit ✈️",
                 initialStart: selectedDayStart,
                 partner: partner,
-                errorMessage: visitError,
+                errorMessage: nil,
                 onSave: { start, note in await saveVisit(start: start, note: note) },
                 onCancel: { isShowingPlanVisit = false }
             )
@@ -276,7 +274,6 @@ struct CalendarScreen: View {
 
     private func saveVisit(start: Date, note: String?) async {
         guard let uid = authService.uid else { return }
-        visitError = nil
         let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let visit = Visit(
             id: UUID().uuidString,
@@ -284,42 +281,44 @@ struct CalendarScreen: View {
             note: (trimmedNote?.isEmpty == false) ? trimmedNote : nil,
             createdBy: uid
         )
-        do {
-            try await firestore.addVisit(visit, coupleId: coupleId)
-            visits.append(visit)
-            try await followPlan(removed: nil)
-            isShowingPlanVisit = false
-        } catch {
-            visitError = "Couldn't save the visit. Check your connection and try again."
-        }
+        // Saved on this device at once and synced when the connection
+        // allows; offline this used to leave the sheet spinning.
+        firestore.addVisit(visit, coupleId: coupleId, onFailure: { _ in saveFailed() })
+        visits.append(visit)
+        isShowingPlanVisit = false
+        await followPlan(removed: nil)
     }
 
     private func deleteVisit(_ visit: Visit) async {
-        do {
-            try await firestore.deleteVisit(id: visit.id, coupleId: coupleId)
-            visits.removeAll { $0.id == visit.id }
-            try await followPlan(removed: visit)
-        } catch {
-            errorMessage = "Couldn't delete. Check your connection and try again."
-        }
+        firestore.deleteVisit(id: visit.id, coupleId: coupleId, onFailure: { _ in saveFailed() })
+        visits.removeAll { $0.id == visit.id }
+        await followPlan(removed: visit)
     }
 
     private func deleteDate(_ date: ImportantDate) async {
-        do {
-            try await firestore.deleteImportantDate(id: date.id, coupleId: coupleId)
-            dates.removeAll { $0.id == date.id }
-        } catch {
-            errorMessage = "Couldn't delete. Check your connection and try again."
+        firestore.deleteImportantDate(id: date.id, coupleId: coupleId, onFailure: { _ in saveFailed() })
+        dates.removeAll { $0.id == date.id }
+    }
+
+    /// A change the server rejected, after this screen already showed it.
+    private func saveFailed() {
+        Task {
+            // Reload first: a successful load clears the message.
+            await load()
+            errorMessage = "Couldn't save a change. Check your connection and try again."
         }
     }
 
-    /// Points the main countdown at the next planned visit when the plan changes.
-    private func followPlan(removed: Visit?) async throws {
-        guard let uid = authService.uid else { return }
-        let current = try await firestore.fetchCouple(coupleId: coupleId)
+    /// Points the main countdown at the next planned visit when the plan
+    /// changes. Uses this device's copy of the pairing when offline, so a
+    /// saved visit is never reported as failing just for being offline.
+    private func followPlan(removed: Visit?) async {
+        guard let uid = authService.uid,
+              let current = try? await firestore.currentCouple(coupleId: coupleId)
+        else { return }
         let resolved = MeetupPlanner.resolvedNextMeetup(current: current.nextMeetupDate, visits: visits, removed: removed)
         guard resolved != current.nextMeetupDate else { return }
-        try await firestore.setNextMeetupDate(resolved, coupleId: coupleId, uid: uid)
+        firestore.setNextMeetupDate(resolved, coupleId: coupleId, uid: uid, onFailure: { _ in saveFailed() })
         var updated = current
         updated.nextMeetupDate = resolved
         updated.lastUpdatedBy = uid

@@ -92,7 +92,8 @@ final class CountdownViewModel: ObservableObject {
     }
 
     /// Saves the visit from the sheet and updates what the countdown follows.
-    /// Returns the resulting state to apply locally, or nil on failure.
+    /// Returns the resulting state to apply locally (nil if no sheet was
+    /// open). Writes the server refuses later are reported by reportFailure.
     func saveVisit(start: Date, note: String?, current: RelationshipState) async -> RelationshipState? {
         guard let purpose = visitSheetPurpose else { return nil }
         errorMessage = nil
@@ -103,42 +104,41 @@ final class CountdownViewModel: ObservableObject {
             note: (trimmedNote?.isEmpty == false) ? trimmedNote : nil,
             createdBy: uid
         )
-        do {
-            try await firestore.addVisit(visit, coupleId: coupleId)
-            var visits = try await firestore.fetchVisits(coupleId: coupleId)
-            var updated = current
+        // Saved on this device at once, synced when the connection allows.
+        firestore.addVisit(visit, coupleId: coupleId, onFailure: reportFailure)
+        // The plan including the new visit: the server's when reachable,
+        // otherwise this device's copy, and at least the visit just added.
+        var visits = (try? await firestore.fetchVisits(coupleId: coupleId)) ?? []
+        if !visits.contains(where: { $0.id == visit.id }) { visits.append(visit) }
+        var updated = current
 
-            switch purpose {
-            case .leaving:
-                let next = MeetupPlanner.nextUpcoming(visits)?.start ?? visit.start
-                firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next, onFailure: reportFailure)
-                updated.status = .apart
-                updated.nextMeetupDate = next
-            case .plan, .change:
-                if purpose == .change, let currentDate = current.nextMeetupDate,
-                   let replaced = visits.first(where: { $0.id != visit.id && abs($0.start.timeIntervalSince(currentDate)) < 1 }) {
-                    try await firestore.deleteVisit(id: replaced.id, coupleId: coupleId)
-                    visits.removeAll { $0.id == replaced.id }
-                }
-                // "Change" replaces the current meetup outright (even one set
-                // before visits existed); "plan" only fills a missing or
-                // passed one.
-                let resolved = MeetupPlanner.resolvedNextMeetup(
-                    current: purpose == .change ? nil : current.nextMeetupDate,
-                    visits: visits
-                )
-                if resolved != current.nextMeetupDate {
-                    try await firestore.setNextMeetupDate(resolved, coupleId: coupleId, uid: uid)
-                }
-                updated.nextMeetupDate = resolved
+        switch purpose {
+        case .leaving:
+            let next = MeetupPlanner.nextUpcoming(visits)?.start ?? visit.start
+            firestore.setStatus(.apart, coupleId: coupleId, uid: uid, nextMeetupDate: next, onFailure: reportFailure)
+            updated.status = .apart
+            updated.nextMeetupDate = next
+        case .plan, .change:
+            if purpose == .change, let currentDate = current.nextMeetupDate,
+               let replaced = visits.first(where: { $0.id != visit.id && abs($0.start.timeIntervalSince(currentDate)) < 1 }) {
+                firestore.deleteVisit(id: replaced.id, coupleId: coupleId, onFailure: reportFailure)
+                visits.removeAll { $0.id == replaced.id }
             }
-            updated.lastUpdatedBy = uid
-            updated.lastUpdatedAt = Date()
-            visitSheetPurpose = nil
-            return updated
-        } catch {
-            errorMessage = "Couldn't save the visit. Check your connection and try again."
-            return nil
+            // "Change" replaces the current meetup outright (even one set
+            // before visits existed); "plan" only fills a missing or
+            // passed one.
+            let resolved = MeetupPlanner.resolvedNextMeetup(
+                current: purpose == .change ? nil : current.nextMeetupDate,
+                visits: visits
+            )
+            if resolved != current.nextMeetupDate {
+                firestore.setNextMeetupDate(resolved, coupleId: coupleId, uid: uid, onFailure: reportFailure)
+            }
+            updated.nextMeetupDate = resolved
         }
+        updated.lastUpdatedBy = uid
+        updated.lastUpdatedAt = Date()
+        visitSheetPurpose = nil
+        return updated
     }
 }

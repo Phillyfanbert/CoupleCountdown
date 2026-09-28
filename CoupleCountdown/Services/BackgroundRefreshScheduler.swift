@@ -53,12 +53,20 @@ final class BackgroundRefreshScheduler {
     /// pairing into the widget's cache, then a widget reload: a launch fetch
     /// without the app on screen.
     static func refreshWidgetData() async {
-        guard Auth.auth().currentUser != nil,
+        guard let uid = Auth.auth().currentUser?.uid,
               let coupleId = UserDefaults(suiteName: SharedIdentifiers.appGroup)?.string(forKey: "coupleId"),
               !coupleId.isEmpty,
               let state = try? await FirestoreService().fetchCouple(coupleId: coupleId)
         else { return }
-        AppGroupCache(suiteName: SharedIdentifiers.appGroup).write(state)
+        // Same rule as the app's own sync: someone still waiting for approval
+        // can read the code's doc, but the widget shouldn't count down to a
+        // pairing they aren't in yet.
+        let cache = AppGroupCache(suiteName: SharedIdentifiers.appGroup)
+        if state.participantUIDs.contains(uid) {
+            cache.write(state)
+        } else {
+            cache.clear()
+        }
         WidgetCenter.shared.reloadTimelines(ofKind: "CountdownWidget")
     }
 

@@ -1035,7 +1035,12 @@ happened. Cheap to get right up front, easy to overlook.
   pending writes with estimated server timestamps. Offline (say, an
   arrivals hall) the screen changes straight away and Firestore sends the
   change on reconnect. Before, an offline "Yes, we're together!" did
-  nothing visible.
+  nothing visible. Plan changes (visits, important dates, the meetup date)
+  work the same way: they used to wait for the server, so offline the Save
+  button spun until the connection came back. A change the server refuses
+  is still reported, and the plan reloads to show what was really saved.
+  The web client keeps no copy of the plan on disk, so a plan read while
+  offline counts as a failed load instead of showing an empty plan.
 - **One-way confirm:** "Yes, we're together!" only ever moves *to*
   together. It used to call the toggle, so a Yes tapped just after the
   partner's ran "Leaving again".

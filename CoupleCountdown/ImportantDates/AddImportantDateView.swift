@@ -6,6 +6,8 @@ import CoupleCountdownKit
 struct AddImportantDateView: View {
     let coupleId: String
     let onSaved: () -> Void
+    /// The server rejected the save, after the sheet had closed.
+    let onFailed: () -> Void
 
     @EnvironmentObject private var authService: AuthService
     @Environment(\.dismiss) private var dismiss
@@ -13,8 +15,6 @@ struct AddImportantDateView: View {
     @State private var label = ""
     @State private var date = Date()
     @State private var repeatsAnnually = true
-    @State private var isSaving = false
-    @State private var errorMessage: String?
 
     private let firestore = FirestoreService()
 
@@ -27,17 +27,12 @@ struct AddImportantDateView: View {
                     .accessibilityIdentifier("importantDatePicker")
                 Toggle("Repeats every year", isOn: $repeatsAnnually)
                     .accessibilityIdentifier("repeatsAnnuallyToggle")
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.caption)
-                }
             }
             .navigationTitle("Add Important Date")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await save() }
-                    }
-                    .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    Button("Save") { save() }
+                    .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
                     .accessibilityIdentifier("saveImportantDateButton")
                 }
                 ToolbarItem(placement: .cancellationAction) {
@@ -47,10 +42,8 @@ struct AddImportantDateView: View {
         }
     }
 
-    private func save() async {
+    private func save() {
         guard let uid = authService.uid else { return }
-        isSaving = true
-        errorMessage = nil
         // Deliberately separate from RelationshipState/nextMeetupDate:
         // informational countdowns, not tied to the apart/together state
         // machine (§7.4).
@@ -64,16 +57,14 @@ struct AddImportantDateView: View {
             repeatsAnnually: repeatsAnnually,
             createdBy: uid
         )
-        do {
-            try await firestore.addImportantDate(newDate, coupleId: coupleId)
-            // Only report success and dismiss if the write actually
-            // succeeded, previously this ran unconditionally, so a
-            // failed save looked identical to a successful one.
-            onSaved()
-            dismiss()
-        } catch {
-            errorMessage = "Couldn't save. Check your connection and try again."
-        }
-        isSaving = false
+        // Saved on this device at once and synced when the connection allows
+        // (offline it used to spin until reconnecting). A save the server
+        // rejects is still reported, on the calendar underneath, so a
+        // failure never passes for a success.
+        firestore.addImportantDate(newDate, coupleId: coupleId, onFailure: { _ in
+            Task { @MainActor in onFailed() }
+        })
+        onSaved()
+        dismiss()
     }
 }

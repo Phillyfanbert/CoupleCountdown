@@ -143,7 +143,9 @@ below.
   when the other person opens the app or the widget next refreshes.
 - **Themes are per device**, not shared between partners.
 - **The web app** has no widget, which a website can't provide, and no
-  round-number milestone celebrations.
+  round-number milestone celebrations. Changes made on it while offline
+  sync when the connection returns, but only if the tab stays open until
+  then (the iPhone app keeps them through a restart).
 - **Real-device install** hasn't been confirmed on a physical iPhone yet
   (see [Status](#status)).
 

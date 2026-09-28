@@ -40,6 +40,16 @@ export function normalizeCode(input) {
 }
 
 /**
+ * The web client keeps no copy of the plan on disk, so a list read while
+ * offline holds only what happens to be in memory: often nothing. Treat that
+ * as a failed load rather than "no plans", so the plan already on screen stays.
+ */
+function fromServer(snap) {
+  if (snap.metadata.fromCache) throw new Error("offline: only a partial local copy");
+  return snap;
+}
+
+/**
  * Closing a code (cancel, or discard when asking to join someone else) also
  * clears any request waiting on it: left behind, the person who asked sat on
  * "Waiting for … to approve" for good.
@@ -214,9 +224,14 @@ export function makeApi(db, uid) {
       return batch.commit();
     },
 
+    // Plan writes (the meetup date, visits, important dates) work like
+    // setStatus: they apply here at once and return the write's promise,
+    // which settles when the server has it. Awaiting them left Save spinning
+    // while offline; callers watch the promise for a refusal instead.
+
     /** Sets (or, with null, clears) what the countdown follows, without changing status. */
-    async setNextMeetupDate(coupleId, date) {
-      await updateDoc(coupleRef(coupleId), {
+    setNextMeetupDate(coupleId, date) {
+      return updateDoc(coupleRef(coupleId), {
         nextMeetupDate: date ? Timestamp.fromDate(date) : deleteField(),
         lastUpdatedBy: uid,
         lastUpdatedAt: serverTimestamp(),
@@ -225,16 +240,17 @@ export function makeApi(db, uid) {
 
     // ---------- visits (planned meetups, with a time) ----------
 
-    async addVisit(coupleId, { start, note }) {
+    /** Returns the new visit and the write's promise (`saved`). */
+    addVisit(coupleId, { start, note }) {
       const visit = { id: globalThis.crypto.randomUUID(), start: normalizedStart(start), note: note || null, createdBy: uid };
       const fields = { start: Timestamp.fromDate(visit.start), createdBy: uid };
       if (visit.note) fields.note = visit.note;
-      await setDoc(doc(collection(coupleRef(coupleId), "visits"), visit.id), fields);
-      return visit;
+      const saved = setDoc(doc(collection(coupleRef(coupleId), "visits"), visit.id), fields);
+      return { visit, saved };
     },
 
     async fetchVisits(coupleId) {
-      const snap = await getDocs(collection(coupleRef(coupleId), "visits"));
+      const snap = fromServer(await getDocs(collection(coupleRef(coupleId), "visits")));
       return snap.docs
         .map((d) => {
           const data = d.data();
@@ -244,30 +260,35 @@ export function makeApi(db, uid) {
         .filter(Boolean);
     },
 
-    async deleteVisit(coupleId, id) {
-      await deleteDoc(doc(collection(coupleRef(coupleId), "visits"), id));
+    deleteVisit(coupleId, id) {
+      return deleteDoc(doc(collection(coupleRef(coupleId), "visits"), id));
     },
 
     // ---------- important dates (calendar days) ----------
 
-    /** `day` is any Date on the picked day (local); stored so it's the same day in every zone. */
-    async addImportantDate(coupleId, { label, day, repeatsAnnually }) {
-      const id = globalThis.crypto.randomUUID();
-      await setDoc(doc(collection(coupleRef(coupleId), "importantDates"), id), {
+    /**
+     * `day` is any Date on the picked day (local); stored so it's the same day
+     * in every zone. Returns the new date (as fetchImportantDates would read
+     * it) and the write's promise (`saved`).
+     */
+    addImportantDate(coupleId, { label, day, repeatsAnnually }) {
+      const stored = storedFromLocalDay(day);
+      const date = { id: globalThis.crypto.randomUUID(), label, date: dayFromStored(stored), repeatsAnnually, createdBy: uid };
+      const saved = setDoc(doc(collection(coupleRef(coupleId), "importantDates"), date.id), {
         label,
-        date: Timestamp.fromDate(storedFromLocalDay(day)),
+        date: Timestamp.fromDate(stored),
         repeatsAnnually,
         createdBy: uid,
       });
-      return id;
+      return { date, saved };
     },
 
-    async deleteImportantDate(coupleId, id) {
-      await deleteDoc(doc(collection(coupleRef(coupleId), "importantDates"), id));
+    deleteImportantDate(coupleId, id) {
+      return deleteDoc(doc(collection(coupleRef(coupleId), "importantDates"), id));
     },
 
     async fetchImportantDates(coupleId) {
-      const snap = await getDocs(collection(coupleRef(coupleId), "importantDates"));
+      const snap = fromServer(await getDocs(collection(coupleRef(coupleId), "importantDates")));
       return snap.docs
         .map((d) => {
           const data = d.data();
