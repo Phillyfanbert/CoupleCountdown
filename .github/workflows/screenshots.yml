@@ -1,0 +1,79 @@
+name: Screenshots
+
+# Run by hand: walks two accounts through pairing, planning and a reunion
+# (testReadmeScreenshots) and uploads the screens the README shows.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  screenshots:
+    name: Capture README screenshots (Simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        run: xcodegen generate
+
+      - name: Pick an iPhone simulator (a Pro model on the newest iOS when there is one)
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, re, sys
+          data = json.load(sys.stdin)['devices']
+          def version(runtime):
+              return [int(n) for n in re.findall(r'\d+', runtime.split('iOS')[-1])]
+          phones = [d for r in sorted((r for r in data if 'iOS' in r), key=version, reverse=True)
+                    for d in data[r] if d['name'].startswith('iPhone')]
+          pro = [d for d in phones if re.fullmatch(r'iPhone \d+ Pro', d['name'])]
+          print((pro or phones)[0]['udid'])
+          ")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep "$UDID"
+
+      - name: Boot it with a clean status bar
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}"
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+          xcrun simctl status_bar "${{ steps.sim.outputs.udid }}" override \
+            --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+
+      - name: Run the screenshot walkthrough
+        run: |
+          set -o pipefail
+          mkdir -p screenshots
+          # TEST_RUNNER_ variables reach the test process without the prefix.
+          TEST_RUNNER_SCREENSHOT_DIR="$PWD/screenshots" xcodebuild test \
+            -project CoupleCountdown.xcodeproj \
+            -scheme CoupleCountdown \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -resultBundlePath Screenshots.xcresult \
+            -retry-tests-on-failure -test-iterations 2 \
+            -only-testing:CoupleCountdownUITests/CoupleCountdownUITests/testReadmeScreenshots \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            | tee screenshots-output.log
+          ls -la screenshots
+          test "$(ls screenshots/*.png | wc -l)" -ge 7 || { echo "::error::Expected 7 screenshots"; exit 1; }
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-screenshots
+          path: screenshots/
+          if-no-files-found: warn
+
+      - name: Upload result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-xcresult
+          path: Screenshots.xcresult
+          if-no-files-found: ignore

@@ -693,6 +693,116 @@ final class CoupleCountdownUITests: XCTestCase {
         )
     }
 
+    // MARK: - README screenshots
+
+    /// Not part of the regular suite: the Screenshots workflow runs it alone
+    /// (the Build workflow skips it) and publishes the images the README
+    /// shows. Two real accounts walk through pairing, planning and a
+    /// reunion, Alex in New York time and Sam in London time, so the partner
+    /// clocks differ. Skipped unless SCREENSHOT_DIR says where to save.
+    func testReadmeScreenshots() throws {
+        guard let path = ProcessInfo.processInfo.environment["SCREENSHOT_DIR"] else {
+            throw XCTSkip("Set SCREENSHOT_DIR (TEST_RUNNER_SCREENSHOT_DIR for xcodebuild) to run this")
+        }
+        let directory = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func shot(_ name: String) throws {
+            Thread.sleep(forTimeInterval: 1.5) // let animations settle
+            let image = XCUIScreen.main.screenshot()
+            try image.pngRepresentation.write(to: directory.appendingPathComponent("\(name).png"))
+            let attachment = XCTAttachment(screenshot: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        // Without the reset, a relaunch keeps whoever is signed out or in;
+        // TZ sets the time zone that person's device reports.
+        func launch(reset: Bool = false, timeZone: String) -> XCUIApplication {
+            let app = XCUIApplication()
+            app.launchArguments = (reset ? ["-uiTestReset"] : []) + ["-uiTestLongCelebration"]
+            app.launchEnvironment["TZ"] = timeZone
+            app.launch()
+            return app
+        }
+        let newYork = "America/New_York", london = "Europe/London"
+
+        // Alex creates a pairing and gets a code to share.
+        var app = launch(reset: true, timeZone: newYork)
+        let alexEmail = signUp(app, name: "Alex", lastName: "Rivera")
+        let codeText = app.staticTexts["generatedCodeText"]
+        tap(app.buttons["createPairingButton"], until: codeText, in: app)
+        let code = codeText.label
+        try shot("1-pairing-code")
+        tap(app.buttons["continueToCountdownButton"], until: app.buttons["toggleStatusButton"], in: app)
+        signOut(app)
+
+        // Sam enters it and is asked whose pairing it is.
+        app = launch(timeZone: london)
+        let samEmail = signUp(app, name: "Sam", lastName: "Lee")
+        let codeField = app.textFields["joinCodeTextField"]
+        tap(app.buttons["joinPairingButton"], until: codeField, in: app)
+        codeField.tap()
+        codeField.typeText(code)
+        let confirm = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "Pair with")).firstMatch
+        tap(app.buttons["joinButton"], until: confirm, in: app)
+        try shot("2-pair-with")
+        confirm.buttons["Pair"].tap()
+        XCTAssertTrue(app.staticTexts["awaitingApprovalText"].waitForExistence(timeout: 20))
+        signOut(app)
+
+        // Alex approves, plans the visit, and adds their anniversary.
+        app = launch(timeZone: newYork)
+        signIn(app, email: alexEmail, password: testPassword)
+        let request = app.alerts.matching(NSPredicate(format: "label BEGINSWITH %@", "Pair with")).firstMatch
+        XCTAssertTrue(request.waitForExistence(timeout: 30), "Alex should be asked to approve Sam")
+        declineSavePasswordPrompt(app)
+        try shot("3-approve")
+        tapWhenReady(request.buttons["Approve"], in: app)
+        XCTAssertTrue(waitForNonExistence(of: app.descendants(matching: .any)["joinRequestCard"], timeout: 15))
+
+        tap(app.buttons["planVisitButton"], until: app.buttons["saveDateButton"], in: app)
+        try shot("4-plan-visit")
+        tap(app.buttons["saveDateButton"], until: app.staticTexts["countdownSeconds"], in: app)
+
+        tapToolbarItem(app, identifier: "calendarNavLink", label: "Calendar")
+        let labelField = app.textFields["dateLabelTextField"]
+        tap(app.buttons["addImportantDateButton"], until: labelField, in: app)
+        labelField.tap()
+        labelField.typeText("Our anniversary")
+        app.buttons["saveImportantDateButton"].tap()
+        XCTAssertTrue(app.staticTexts["Our anniversary"].firstMatch.waitForExistence(timeout: 15))
+        try shot("5-calendar")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        signOut(app)
+
+        // Sam sends a "thinking of you".
+        app = launch(timeZone: london)
+        signIn(app, email: samEmail, password: testPassword)
+        let pingButton = app.buttons["thinkingOfYouButton"]
+        XCTAssertTrue(pingButton.waitForExistence(timeout: 20))
+        declineSavePasswordPrompt(app)
+        tapWhenReady(pingButton, in: app)
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "Sent, with love"), evaluatedWith: pingButton, handler: nil)
+        waitForExpectations(timeout: 15)
+        signOut(app)
+
+        // Alex's countdown, with Sam's nudge; then they're together again.
+        app = launch(timeZone: newYork)
+        signIn(app, email: alexEmail, password: testPassword)
+        XCTAssertTrue(app.staticTexts["receivedPingText"].waitForExistence(timeout: 20))
+        declineSavePasswordPrompt(app)
+        try shot("6-countdown")
+        tapWhenReady(app.buttons["toggleStatusButton"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["milestoneCelebration"].waitForExistence(timeout: 10))
+        try shot("7-reunion")
+        dismissCelebration(app)
+
+        // Clean up: the reset deletes Alex; the class tearDown deletes Sam.
+        app = launchFreshApp()
+        signIn(app, email: samEmail, password: testPassword)
+        XCTAssertTrue(app.buttons["thinkingOfYouButton"].waitForExistence(timeout: 20))
+    }
+
     private func waitForNonExistence(of element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "exists == false")
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)

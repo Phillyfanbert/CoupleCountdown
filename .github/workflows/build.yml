@@ -139,7 +139,8 @@ jobs:
           # appears at unpredictable moments after sign-in and has covered a
           # button mid-tap in otherwise-passing runs. A real bug fails both
           # attempts, and the check below still requires the tests to run.
-          # Reuses the simulator already booted above. Each test launches
+          # The README screenshot walkthrough is left to the Screenshots
+          # workflow. Reuses the simulator already booted above. Each test launches
           # its own app instance with "-uiTestReset" (see
           # CoupleCountdownApp.init()), so tests don't depend on each
           # other or on the screenshot step's launch above.
@@ -150,6 +151,7 @@ jobs:
             -derivedDataPath DerivedData \
             -resultBundlePath TestResults.xcresult \
             -retry-tests-on-failure -test-iterations 2 \
+            -skip-testing:CoupleCountdownUITests/CoupleCountdownUITests/testReadmeScreenshots \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
